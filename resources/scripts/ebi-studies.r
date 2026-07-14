@@ -37,6 +37,30 @@ MOLECULAR_FRACTION_THRESHOLD <- 0.5
 MOLECULAR_REVIEW_BAND <- c(0.2, 0.8)
 ANCESTRY_FRACTION_REVIEW_THRESHOLD <- 0.8
 
+## Store-size model. Two regimes, because the storage layouts differ:
+##
+## Dense (and hybrid) stores are a full trait x reference-variant matrix.
+## Calibrated on the IEU OpenGWAS ukb-b store: 2,500 traits reference-completed
+## to 12M variants occupied ~75 GB, i.e. ~2.5 bytes per (trait x variant) cell
+## (the pre-imputation point, 9.5M variants at 60 GB, gives the same 2.5
+## b/cell). Reference completion projects every analysis onto the *same*
+## reference panel, so size is n_analyses x REF_COMPLETION_VARIANTS x 2.5 bytes
+## regardless of the study's own observed density -- a store imputed to 44M
+## variants still completes to the 12M reference (~30 MB per analysis).
+REF_COMPLETION_VARIANTS <- 12e6
+STORE_BYTES_PER_CELL <- 2.5
+GENOME_MB <- 3000
+
+## Ragged (molecular-QTL) stores are sparse: each analysis keeps only a small
+## slice of the genome -- its cis window plus significant trans regions and
+## suggestive hits, roughly RAGGED_KEPT_MB of the ~3,000 Mb genome. The stored
+## variant count per analysis is therefore (n_variants * RAGGED_KEPT_MB /
+## GENOME_MB), at ~5 bytes per stored association (a little more than the dense
+## per-cell cost because of sparse indexing overhead). e.g. 3,000 analyses at
+## 10M variants -> 10e6 * 20/3000 * 5 bytes * 3000 ~= 1 GB.
+RAGGED_KEPT_MB <- 20             # genomic Mb retained per analysis
+RAGGED_BYTES_PER_ASSOC <- 5      # bytes per stored variant (sparse indexing)
+
 data_dir <- "resources/data"
 derived_dir <- file.path(data_dir, "derived")
 dir.create(derived_dir, showWarnings = FALSE)
@@ -246,6 +270,16 @@ full[, is_molecular := grepl(molecular_pattern,
 ## ---------------------------------------------------------------------
 full[, n_variants := as.integer(parse_variant_count(PLATFORM..SNPS.PASSING.QC.))]
 
+## GWAS Catalog ASSOCIATION COUNT: the number of genome-wide-significant
+## associations for the analysis (p-value based, from the summary statistics).
+## This is an objective power signal at the store level: if almost none of a
+## study's analyses have any hit, the study was likely underpowered overall.
+## (Sample size alone does not determine power -- case count matters more for
+## binary traits, and heritability / polygenicity contribute too.)
+full[, association_count := suppressWarnings(as.integer(ASSOCIATION.COUNT))]
+full[is.na(association_count), association_count := 0L]
+full[, has_gwas_hit := association_count > 0L]
+
 ## Per-analysis molecular subtype from the trait text (NA for non-molecular).
 full[, molecular_subtype := classify_molecular(paste(DISEASE.TRAIT, MAPPED_TRAIT))]
 
@@ -318,6 +352,16 @@ full <- merge(
   by = c("PUBMED.ID", "ancestry_group")
 )
 
+## Per-analysis reference-completed size estimate (GB). Dense/hybrid analyses
+## each occupy one full reference-variant column of the matrix; ragged analyses
+## keep only a genome slice (see model constants above). Summed per store below.
+full[, est_analysis_gb := fifelse(
+  store_type == "ragged",
+  as.numeric(fcoalesce(n_variants, as.integer(REF_COMPLETION_VARIANTS))) *
+    (RAGGED_KEPT_MB / GENOME_MB) * RAGGED_BYTES_PER_ASSOC / 1e9,
+  REF_COMPLETION_VARIANTS * STORE_BYTES_PER_CELL / 1e9
+)]
+
 ## ---------------------------------------------------------------------
 ## 6. Build per-store summary (hybrid rows pool across many pubmed IDs
 ## sharing an ancestry group, so this re-aggregates by store_key rather
@@ -341,7 +385,9 @@ store_summary <- full[, .(
   median_variants = as.integer(safe_median(n_variants)),
   median_sample_size = as.integer(safe_median(sample_size)),
   min_sample_size = as.integer(safe_min(sample_size)),
-  max_sample_size = as.integer(safe_max(sample_size))
+  max_sample_size = as.integer(safe_max(sample_size)),
+  prop_with_gwas_hit = round(mean(has_gwas_hit), 3),
+  est_completed_size_gb = round(sum(est_analysis_gb), 1)
 ), by = store_key]
 
 row_level_would_be_ragged <- store_summary$molecular_fraction >= MOLECULAR_FRACTION_THRESHOLD
@@ -382,7 +428,8 @@ analyses_out <- full[, .(
   STUDY.ACCESSION, PUBMED.ID, FIRST.AUTHOR, STUDY, DISEASE.TRAIT, MAPPED_TRAIT,
   ancestry_group, ancestry_fraction, is_molecular, molecular_subtype,
   store_type, store_key, molecular_type,
-  study_design, n_cases, n_controls, sample_size, n_variants
+  study_design, n_cases, n_controls, sample_size, n_variants,
+  association_count, MAPPED_TRAIT_URI
 )]
 setorder(analyses_out, store_key, STUDY.ACCESSION)
 fwrite(analyses_out, file.path(derived_dir, "store-candidates-analyses.tsv"), sep = "\t")
