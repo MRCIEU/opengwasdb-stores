@@ -1,0 +1,228 @@
+---
+title: "Beta-distribution phenotype-SD estimation"
+subtitle: "How far a uniform common-variant MAF shortcut gets for EUR-like and AFR-like GWAS"
+date: today
+format:
+  html:
+    toc: true
+    toc-depth: 2
+    df-print: paged
+    embed-resources: true
+    code-fold: true
+    theme: cosmo
+execute:
+  warning: false
+  message: false
+---
+
+```{r setup}
+library(dplyr)
+library(ggplot2)
+library(knitr)
+library(scales)
+library(tibble)
+library(tidyr)
+
+set.seed(20260715)
+
+true_trait_sd <- 1.7
+n_gwas <- 50000
+maf_min <- 0.05
+maf_max <- 0.5
+sample_sizes <- c(1000, 10000, 50000)
+n_reps <- 200
+
+k_of_maf <- function(maf) 1 / (2 * maf * (1 - maf))
+
+sample_common_maf <- function(n, profile) {
+  out <- numeric(0)
+  while (length(out) < n) {
+    m <- max(n * 3, 10000)
+    if (profile == "EUR-like") {
+      # A toy common-variant distribution: more mass near the lower common-MAF
+      # boundary than a uniform distribution.
+      q <- ifelse(runif(m) < 0.7, rbeta(m, 0.75, 1.55), runif(m))
+    } else if (profile == "AFR-like") {
+      # A toy common-variant distribution closer to flat, with a little extra
+      # intermediate-frequency mass.
+      q <- ifelse(runif(m) < 0.55, rbeta(m, 1.15, 1.15), runif(m))
+    } else {
+      q <- runif(m)
+    }
+    maf <- pmin(q, 1 - q)
+    maf <- maf[maf >= maf_min & maf <= maf_max]
+    out <- c(out, maf)
+  }
+  out[seq_len(n)]
+}
+
+reference_k <- tibble(profile = c("EUR-like", "AFR-like", "Uniform common MAF")) |>
+  mutate(
+    maf = lapply(profile, \(p) {
+      if (p == "Uniform common MAF") runif(500000, maf_min, maf_max)
+      else sample_common_maf(500000, p)
+    }),
+    expected_k = vapply(maf, \(x) mean(k_of_maf(x)), numeric(1))
+  ) |>
+  select(profile, expected_k)
+
+uniform_expected_k <- reference_k |>
+  filter(profile == "Uniform common MAF") |>
+  pull(expected_k)
+
+simulate_one <- function(profile, n_variants) {
+  maf <- sample_common_maf(n_variants, profile)
+  se <- true_trait_sd / sqrt(n_gwas / k_of_maf(maf))
+  beta <- rnorm(n_variants, mean = 0, sd = se)
+  beta_sd <- sd(beta)
+  profile_expected_k <- reference_k |>
+    filter(profile == !!profile) |>
+    pull(expected_k)
+
+  tibble(
+    method = c("oracle sample MAF", "profile reference MAF", "uniform common MAF"),
+    estimated_trait_sd = c(
+      beta_sd * sqrt(n_gwas / mean(k_of_maf(maf))),
+      beta_sd * sqrt(n_gwas / profile_expected_k),
+      beta_sd * sqrt(n_gwas / uniform_expected_k)
+    )
+  )
+}
+
+sim <- expand_grid(
+  profile = c("EUR-like", "AFR-like"),
+  n_variants = sample_sizes,
+  rep = seq_len(n_reps)
+) |>
+  rowwise() |>
+  do(bind_cols(
+    tibble(profile = .$profile, n_variants = .$n_variants, rep = .$rep),
+    simulate_one(.$profile, .$n_variants)
+  )) |>
+  ungroup() |>
+  mutate(
+    relative_error = estimated_trait_sd / true_trait_sd - 1,
+    abs_relative_error = abs(relative_error),
+    method = factor(method, c("oracle sample MAF", "profile reference MAF", "uniform common MAF"))
+  )
+```
+
+## Purpose
+
+This is a quick toy calculation for the effect-scale ticket. It asks whether a
+random sample of common-variant betas can recover a continuous trait's phenotype
+SD when `N` is known but variant-level MAF is missing.
+
+For null common variants,
+
+```text
+SE(beta) ~= trait_sd / sqrt(2 * N * MAF * (1 - MAF))
+```
+
+If we only observe the spread of betas, then:
+
+```text
+sd(beta) ~= trait_sd * sqrt(E[1 / (2 * MAF * (1 - MAF))] / N)
+```
+
+So the shortcut is only as good as the assumed MAF distribution and the
+assumption that the sampled variants are mostly null. Here we simulate two toy
+common-variant profiles:
+
+- `EUR-like`: common variants are skewed toward lower MAF.
+- `AFR-like`: common variants are closer to uniform across 0.05-0.5.
+
+This is not a real reference-panel benchmark. It is a cheap sanity check for
+whether the shortcut belongs at the bottom of the provenance ladder.
+
+## Expected MAF factor
+
+The estimator hinges on `E[1 / (2 * MAF * (1 - MAF))]`. Uniform common MAF is a
+decent but not neutral assumption: lower-MAF enrichment increases this factor,
+which changes the inferred phenotype SD.
+
+```{r reference-k}
+kable(
+  reference_k |>
+    mutate(expected_k = round(expected_k, 3)),
+  col.names = c("Assumed MAF profile", "E[1 / (2p(1-p))]"),
+  caption = "MAF-distribution factor used to turn sd(beta) into phenotype SD."
+)
+```
+
+## Accuracy by sample size
+
+```{r summary-table}
+summary_tbl <- sim |>
+  group_by(profile, n_variants, method) |>
+  summarise(
+    median_error_pct = 100 * median(relative_error),
+    p05_error_pct = 100 * quantile(relative_error, 0.05),
+    p95_error_pct = 100 * quantile(relative_error, 0.95),
+    within_10_pct = mean(abs_relative_error <= 0.10),
+    .groups = "drop"
+  )
+
+kable(
+  summary_tbl |>
+    mutate(across(ends_with("_pct"), \(x) round(x, 1)),
+           within_10_pct = percent(within_10_pct, accuracy = 1)),
+  col.names = c("Profile", "Betas sampled", "Method", "Median error (%)",
+                "5th pct error (%)", "95th pct error (%)", "Within 10%"),
+  caption = "Relative error in phenotype-SD estimates over simulated GWAS replicates."
+)
+```
+
+```{r error-plot, fig.width=8, fig.height=5}
+plot_dat <- sim |>
+  filter(n_variants == 10000)
+
+ggplot(plot_dat, aes(method, 100 * relative_error, fill = method)) +
+  geom_hline(yintercept = 0, colour = "grey45") +
+  geom_boxplot(width = 0.65, outlier.alpha = 0.15) +
+  facet_wrap(~profile) +
+  scale_fill_manual(values = c(
+    "oracle sample MAF" = "#2a78d6",
+    "profile reference MAF" = "#1baf7a",
+    "uniform common MAF" = "#eda100"
+  )) +
+  labs(x = NULL, y = "Phenotype-SD estimate error (%)",
+       title = "At 10,000 random common variants, sampling error is small",
+       subtitle = "The uniform-MAF shortcut is biased when the real common-MAF profile is lower-frequency enriched.") +
+  theme_minimal(base_size = 12) +
+  theme(legend.position = "none",
+        axis.text.x = element_text(angle = 25, hjust = 1))
+```
+
+```{r heatmap, fig.width=8, fig.height=4.8}
+heat <- summary_tbl |>
+  mutate(median_abs_error_pct = abs(median_error_pct))
+
+ggplot(heat, aes(factor(n_variants), method, fill = median_abs_error_pct)) +
+  geom_tile(colour = "white", linewidth = 1) +
+  geom_text(aes(label = paste0(round(median_abs_error_pct, 1), "%")), size = 3.5) +
+  facet_wrap(~profile) +
+  scale_fill_gradient(low = "#eef4fd", high = "#d65642", name = "Median abs.\nerror") +
+  labs(x = "Random betas sampled", y = NULL,
+       title = "Bias from the MAF assumption dominates once the beta sample is large") +
+  theme_minimal(base_size = 12)
+```
+
+## Takeaways
+
+The beta-distribution shortcut is plausible as a low-effort fallback, but it is
+not in the same class as `SE + source MAF` or `SE + reference MAF`.
+
+For the effect-scale provenance ladder:
+
+- `estimated_from_beta_distribution` should sit below reference-MAF estimation.
+- It should be restricted to common-variant random samples, not top hits.
+- It should record the assumed MAF profile, `N`, number of sampled betas, MAF
+  bounds, excluded variants, and the estimator version.
+- It is useful as a triage/QC signal even when it is too assumption-heavy to
+  rescale a published store automatically.
+
+The shortcut looks most defensible when the sample contains thousands of random
+common variants and the real common-MAF profile is close to the assumed profile.
+It becomes fragile when the source has strong MAF-dependent filtering, enriched
+low-frequency variants, winner's-curse/top-hit sampling, or mixed ancestry.

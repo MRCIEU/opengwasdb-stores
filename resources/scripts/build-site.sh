@@ -21,12 +21,16 @@ mkdir -p "$DOCS"
 echo "==> store-curation report"
 quarto render resources/scripts/ebi-studies.qmd --to html
 
+echo "==> beta-scale estimation report"
+quarto render resources/scripts/beta-scale-estimation.qmd --to html
+
 echo "==> prioritisation dashboard"
 Rscript resources/scripts/make-dashboard.r
 
 echo "==> assembling docs/"
 install_html() { cp -f "$1" "$2" && echo "    $(basename "$2")"; }
 install_html resources/scripts/ebi-studies.html                         "$DOCS/store-curation.html"
+install_html resources/scripts/beta-scale-estimation.html               "$DOCS/beta-scale-estimation.html"
 install_html resources/data/derived/store-prioritisation-dashboard.html "$DOCS/prioritisation-dashboard.html"
 if [ -f resources/scripts/mvp-imputation-filters.html ]; then
   install_html resources/scripts/mvp-imputation-filters.html            "$DOCS/imputation-filters.html"
