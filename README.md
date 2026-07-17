@@ -78,6 +78,10 @@ scale, and sample-size metadata. `build.yaml` records the concrete build shape
 and OpenGWASDB builder entry point. `validation.yaml` summarises validation
 status and points to any detailed reports.
 
+The draft field-level schema for these files, including sidecars for ancestry
+assignment and ragged sparse-region evidence, is recorded in
+`docs/release-metadata-schema.md`.
+
 The repository stores metadata and small reports only. Store artifacts, source
 data, large logs, and large benchmark outputs belong outside this repository and
 should be referenced by URI when needed.

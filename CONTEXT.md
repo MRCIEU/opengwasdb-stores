@@ -128,9 +128,17 @@ _Avoid_: trait annotation, display metadata
 The OpenGWASDB controlled vocabulary value describing the scale of stored effects for an Analysis, such as `sd_units`, `log_or`, or `log_hazard`.
 _Avoid_: source effect label
 
-**Ancestry Code**:
-A registry-normalised ancestry label used for filtering and grouping when known, while preserving the source-provided ancestry label separately.
-_Avoid_: ancestry label
+**Source Ancestry Label**:
+The ancestry or population label supplied by the upstream Source Collection and preserved as provenance.
+_Avoid_: assigned ancestry
+
+**Assigned Ancestry**:
+The registry-normalised ancestry label used for store inclusion, routing, grouping, and ancestry-specific build choices.
+_Avoid_: source ancestry label
+
+**Ancestry Assignment Method**:
+The controlled value describing how Assigned Ancestry was produced, such as AF-based assignment, source fallback, source trusted because allele frequencies were unavailable, or unassigned.
+_Avoid_: ancestry confidence, ancestry status
 
 **Sample Size Metadata**:
 Analysis-level or variant-level metadata describing participant count, case-control counts, effective sample size, or unknown sample-size semantics.

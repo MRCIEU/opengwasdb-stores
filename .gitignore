@@ -13,3 +13,6 @@ resources/scripts/.quarto/
 
 # Large downloaded summary statistics used by mvp-imputation-filters.qmd.
 resources/data/mvp-example/
+
+# Ragged-store spike: transient downloads + filtered outputs (regenerate).
+resources/data/ragged-spike/
