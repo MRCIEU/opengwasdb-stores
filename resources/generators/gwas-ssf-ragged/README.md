@@ -24,7 +24,17 @@ PYTHONPATH="${OPENGWASDB_REPO}" \
 `emit` freezes the selected analyses and writes a release bundle. `filter`
 downloads each full harmonised GWAS-SSF file transiently, writes a filtered
 GWAS-SSF-shaped file containing the configured sparse regions, deletes the full
-download, and stamps checksums/sizes back into `analyses.tsv`. `build-store.py`
+download, and stamps checksums/sizes back into `analyses.tsv`. Each Analysis's
+download+filter is independent (own download, own output file, only a shared
+read-only `targets` table), so `filter` runs them across a small pool of
+forked workers (`parallel::mclapply`, issue #32) instead of one at a time —
+configure the pool size with `filter.parallel_workers` in the family config or
+`--parallel-workers=N` on the command line; it defaults to 4, a deliberately
+conservative number chosen to avoid opening too many concurrent connections to
+EBI's public FTP rather than maxing out available cores. Per-analysis
+`download_seconds`/`filter_seconds`/`total_seconds` in
+`sidecars/filter_summary.tsv` and per-analysis error handling are unchanged by
+parallelising the run. `build-store.py`
 passes the filtered files to OpenGWASDB and records a small read-back report.
 `refresh-artifacts` updates artifact paths in an existing release bundle after
 changing `output.artifact_root` or `output.artifact_subdir`. `refresh-build`

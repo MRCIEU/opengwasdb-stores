@@ -1,13 +1,14 @@
 suppressPackageStartupMessages({
   library(data.table)
   library(yaml)
+  library(parallel)
 })
 
 `%||%` <- function(x, y) if (is.null(x) || length(x) == 0 || is.na(x)) y else x
 
 parse_args <- function(args) {
   out <- list(mode = "emit", config = NULL, max_analyses = NA_integer_,
-              only_analysis_id = "")
+              only_analysis_id = "", parallel_workers = NA_integer_)
   for (arg in args) {
     if (grepl("^--config=", arg)) out$config <- sub("^--config=", "", arg)
     else if (grepl("^--mode=", arg)) out$mode <- sub("^--mode=", "", arg)
@@ -15,6 +16,8 @@ parse_args <- function(args) {
       out$max_analyses <- as.integer(sub("^--max-analyses=", "", arg))
     } else if (grepl("^--only-analysis-id=", arg)) {
       out$only_analysis_id <- sub("^--only-analysis-id=", "", arg)
+    } else if (grepl("^--parallel-workers=", arg)) {
+      out$parallel_workers <- as.integer(sub("^--parallel-workers=", "", arg))
     } else {
       stop("Unknown argument: ", arg)
     }
@@ -777,7 +780,42 @@ process_one <- function(row, targets, cfg, root, filtered_dir, work_dir) {
   list(summary = data, ranges = ranges)
 }
 
-filter_release <- function(cfg, root, max_analyses = NA_integer_, only_analysis_id = "") {
+# Conservative default worker count for `filter_release()`'s parallel
+# analyses (issue #32). Each worker holds its own concurrent connection to
+# EBI's public FTP, so this stays well below typical core counts rather than
+# maxing out `parallel::detectCores()` — a handful of workers already
+# reclaims most of the wall-clock win without risking rate-limiting/blocking
+# from the remote host.
+default_parallel_workers <- 4L
+
+failed_summary_row <- function(row, message) {
+  data.table(
+    analysis_id = row$analysis_id,
+    status = "failed",
+    error = message,
+    attempt = 1L,
+    retry_count = 0L,
+    source_url = row$source_url,
+    downloaded_bytes = NA_real_,
+    input_rows = NA_integer_,
+    retained_rows = NA_integer_,
+    retained_fraction = NA_real_,
+    cis_rows = NA_integer_,
+    significant_trans_regions = NA_integer_,
+    significant_trans_rows = NA_integer_,
+    suggestive_leads = NA_integer_,
+    output_file = row$source_file,
+    output_bytes = NA_real_,
+    checksum_algorithm = "sha256",
+    checksum = "",
+    download_seconds = NA_real_,
+    filter_seconds = NA_real_,
+    total_seconds = NA_real_
+  )
+}
+
+filter_release <- function(cfg, root, max_analyses = NA_integer_, only_analysis_id = "",
+                            parallel_workers = NA_integer_) {
   release_dir <- path_abs(root, cfg$output$release_dir)
   analyses_path <- file.path(release_dir, "analyses.tsv")
   if (!file.exists(analyses_path)) emit_bundle(cfg, root)
@@ -801,53 +839,62 @@ filter_release <- function(cfg, root, max_analyses = NA_integer_, only_analysis_
   if (!is.na(max_analyses)) todo <- todo[seq_len(min(max_analyses, .N))]
   partial_run <- !is.na(max_analyses) || nzchar(only_analysis_id)
 
+  workers <- if (!is.na(parallel_workers)) {
+    parallel_workers
+  } else {
+    as.integer(cfg$filter$parallel_workers %||% default_parallel_workers)
+  }
+  workers <- max(1L, min(workers, nrow(todo)))
+
   paths <- artifact_paths(cfg, root)
   filtered_dir <- paths$filtered_dir
   work_dir <- paths$work_dir
+  dir.create(filtered_dir, recursive = TRUE, showWarnings = FALSE)
+  dir.create(work_dir, recursive = TRUE, showWarnings = FALSE)
+
+  run_row <- function(i) {
+    row <- todo[i]
+    tryCatch(
+      process_one(row, targets, cfg, root, filtered_dir, work_dir),
+      error = function(e) {
+        list(summary = failed_summary_row(row, conditionMessage(e)), ranges = NULL)
+      }
+    )
+  }
+  cat(sprintf("Filtering %d analyses with %d parallel worker(s)\n", nrow(todo), workers))
+  results <- if (workers > 1L) {
+    mclapply(seq_len(nrow(todo)), run_row, mc.cores = workers, mc.preschedule = FALSE)
+  } else {
+    lapply(seq_len(nrow(todo)), run_row)
+  }
+  # A forked worker that dies outright (e.g. OOM-killed) hands mclapply() a
+  # bare condition object instead of run_row()'s usual list(summary=, ranges=)
+  # — normal per-analysis errors are already caught inside run_row(). Convert
+  # that case to an ordinary failed row rather than letting it corrupt
+  # rbindlist() below or silently drop the analysis from the summary.
+  results <- lapply(seq_along(results), function(i) {
+    result <- results[[i]]
+    if (is.list(result) && !inherits(result, "condition") && !is.null(result$summary)) {
+      result
+    } else {
+      row <- todo[i]
+      message <- if (inherits(result, "condition")) conditionMessage(result) else "worker exited unexpectedly"
+      list(summary = failed_summary_row(row, message), ranges = NULL)
+    }
+  })
+
   summaries <- list()
   ranges <- list()
   for (i in seq_len(nrow(todo))) {
     row <- todo[i]
+    result <- results[[i]]
     # `gene_name` only exists for target-resolving families (issue #26); for
     # a no-target family this label falls back to the analysis ID alone.
     progress_label <- if ("gene_name" %in% names(row)) row$gene_name else row$analysis_id
     cat(sprintf("[%d/%d] %s %s\n", i, nrow(todo), row$analysis_id, progress_label))
-    result <- tryCatch(
-      process_one(row, targets, cfg, root, filtered_dir, work_dir),
-      error = function(e) {
-        message <- conditionMessage(e)
-        cat("  ERROR: ", message, "\n", sep = "")
-        list(
-          summary = data.table(
-            analysis_id = row$analysis_id,
-            status = "failed",
-            error = message,
-            attempt = 1L,
-            retry_count = 0L,
-            source_url = row$source_url,
-            downloaded_bytes = NA_real_,
-            input_rows = NA_integer_,
-            retained_rows = NA_integer_,
-            retained_fraction = NA_real_,
-            cis_rows = NA_integer_,
-            significant_trans_regions = NA_integer_,
-            significant_trans_rows = NA_integer_,
-            suggestive_leads = NA_integer_,
-            output_file = row$source_file,
-            output_bytes = NA_real_,
-            checksum_algorithm = "sha256",
-            checksum = "",
-            download_seconds = NA_real_,
-            filter_seconds = NA_real_,
-            total_seconds = NA_real_
-          ),
-          ranges = NULL
-        )
-      }
-    )
-    summaries[[length(summaries) + 1]] <- result$summary
-    if (!is.null(result$ranges)) ranges[[length(ranges) + 1]] <- result$ranges
-    if (identical(result$summary$status, "ok")) {
+    if (identical(result$summary$status, "failed")) {
+      cat("  ERROR: ", result$summary$error, "\n", sep = "")
+    } else if (identical(result$summary$status, "ok")) {
       cat(sprintf(
         "  retained %s/%s rows (%.3f%%), output %.1f KB, %.1fs total\n",
         format(result$summary$retained_rows, big.mark = ","),
@@ -857,6 +904,8 @@ filter_release <- function(cfg, root, max_analyses = NA_integer_, only_analysis_
         result$summary$total_seconds
       ))
     }
+    summaries[[length(summaries) + 1]] <- result$summary
+    if (!is.null(result$ranges)) ranges[[length(ranges) + 1]] <- result$ranges
   }
   summary_dt <- rbindlist(summaries, fill = TRUE)
   ranges_dt <- normalise_sparse_regions(ranges)
@@ -986,7 +1035,7 @@ if (args$mode == "emit") {
   emit_bundle(cfg, root)
   validate_emit(cfg, root)
 } else if (args$mode == "filter") {
-  filter_release(cfg, root, args$max_analyses, args$only_analysis_id)
+  filter_release(cfg, root, args$max_analyses, args$only_analysis_id, args$parallel_workers)
 } else if (args$mode == "validate") {
   validate_emit(cfg, root)
 } else if (args$mode == "refresh-artifacts") {
@@ -999,7 +1048,7 @@ if (args$mode == "emit") {
 } else if (args$mode == "all") {
   emit_bundle(cfg, root)
   validate_emit(cfg, root)
-  filter_release(cfg, root, args$max_analyses, args$only_analysis_id)
+  filter_release(cfg, root, args$max_analyses, args$only_analysis_id, args$parallel_workers)
 } else {
   stop("Unknown --mode=", args$mode)
 }
