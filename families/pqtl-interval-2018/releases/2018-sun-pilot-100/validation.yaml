@@ -1,17 +1,18 @@
 status: passed
-validated_at: 2026-08-03T15:14:27.608330+00:00
+validated_at: '2026-08-03T17:11:53Z'
 validator:
-  name: resources/generators/gwas-ssf-ragged/build-store.py
-  version: null
+  name: resources/generators/gwas-ssf-ragged/generate.R
+  version: ~
 checks:
   schema: passed
   files: passed
   reader_smoke_test: passed
   ancestry: not_run
   effect_scale: passed
-  sd_estimation: not_run
+  sd_estimation: passed
   sparse_regions: passed
 reports:
   build_report: sidecars/build_report.tsv
-warnings: []
+warnings:
+- 'GCST90240138: skipped, low reference-AF overlap'
 errors: []

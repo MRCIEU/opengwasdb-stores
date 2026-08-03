@@ -159,24 +159,69 @@ def du_bytes(path: Path) -> int:
     return int(result.stdout.split()[0])
 
 
+_STATUS_RANK = {"not_run": 0, "passed": 1, "passed_with_warnings": 2, "failed": 3}
+
+
+def read_previous_checks_and_warnings(path: Path) -> tuple[dict[str, str], list[str]]:
+    """Read `checks.*` and `warnings` from an existing validation.yaml.
+
+    This intentionally only understands the flat/one-level-nested shape this
+    pipeline writes (see write_yaml_file() in generate.R), so that the
+    ancestry/effect_scale/sd_estimation checks and warnings recorded by the
+    generator's `--mode=effect-scale` stage are preserved rather than
+    clobbered when the build step re-writes validation.yaml.
+    """
+    if not path.exists():
+        return {}, []
+    checks: dict[str, str] = {}
+    warnings: list[str] = []
+    section = None
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        if raw_line == "checks:":
+            section = "checks"
+            continue
+        if raw_line.startswith("warnings:"):
+            section = "warnings"
+            continue
+        if raw_line and not raw_line.startswith(" "):
+            section = None
+            continue
+        if section == "checks" and ":" in raw_line:
+            key, value = raw_line.strip().split(":", 1)
+            checks[key.strip()] = value.strip().strip("'\"")
+        elif section == "warnings" and raw_line.strip().startswith("- "):
+            warnings.append(raw_line.strip()[2:].strip().strip("'\""))
+    return checks, warnings
+
+
 def write_validation_yaml(path: Path, report_path: Path, status: str, warnings: list[str]) -> None:
-    warning_lines = "\n".join(f"  - {warning}" for warning in warnings) if warnings else "[]"
+    previous_checks, previous_warnings = read_previous_checks_and_warnings(path)
+    ancestry_check = previous_checks.get("ancestry", "not_run")
+    effect_scale_check = previous_checks.get("effect_scale", "not_run")
+    sd_estimation_check = previous_checks.get("sd_estimation", "not_run")
+    all_warnings = list(dict.fromkeys([*previous_warnings, *warnings]))
+
+    build_checks = {"schema": "passed", "files": "passed", "reader_smoke_test": "passed", "sparse_regions": "passed"}
+    ranked = [status, ancestry_check, effect_scale_check, sd_estimation_check, *build_checks.values()]
+    overall_status = max(ranked, key=lambda value: _STATUS_RANK.get(value, 0))
+
+    warning_lines = "\n".join(f"  - {warning}" for warning in all_warnings) if all_warnings else "[]"
     validated_at = datetime.now(UTC).isoformat()
     path.write_text(
         "\n".join([
-            f"status: {status}",
+            f"status: {overall_status}",
             f"validated_at: {validated_at}",
             "validator:",
             "  name: resources/generators/gwas-ssf-ragged/build-store.py",
             "  version: null",
             "checks:",
-            "  schema: passed",
-            "  files: passed",
-            "  reader_smoke_test: passed",
-            "  ancestry: not_run",
-            "  effect_scale: passed",
-            "  sd_estimation: not_run",
-            "  sparse_regions: passed",
+            f"  schema: {build_checks['schema']}",
+            f"  files: {build_checks['files']}",
+            f"  reader_smoke_test: {build_checks['reader_smoke_test']}",
+            f"  ancestry: {ancestry_check}",
+            f"  effect_scale: {effect_scale_check}",
+            f"  sd_estimation: {sd_estimation_check}",
+            f"  sparse_regions: {build_checks['sparse_regions']}",
             "reports:",
             f"  build_report: {report_path.relative_to(path.parent)}",
             f"warnings: {warning_lines}",

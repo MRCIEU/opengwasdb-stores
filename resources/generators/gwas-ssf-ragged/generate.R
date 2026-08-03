@@ -323,6 +323,39 @@ manifest_rows <- function(cfg, selected, target_summary, paths) {
   ans[]
 }
 
+build_reference_resources_yaml <- function(cfg) {
+  declared <- cfg$reference_resources %||% list()
+  lapply(declared, function(res) {
+    list(
+      resource_id = res$resource_id,
+      kind = res$kind %||% "reference_af",
+      ancestry = res$ancestry,
+      genome_build = res$genome_build,
+      variant_id_convention = res$variant_id_convention,
+      allele_columns = res$allele_columns,
+      location = res$root,
+      location_kind = res$location_kind %||% "external_directory"
+    )
+  })
+}
+
+build_effect_scale_validation_yaml <- function(cfg) {
+  esv <- cfg$effect_scale_validation
+  if (is.null(esv)) return(NULL)
+  list(
+    enabled = esv$enabled %||% TRUE,
+    reference_resources = esv$reference_resources %||% list(),
+    thresholds = list(
+      maf_min = esv$maf_min %||% 0.01,
+      maf_max = esv$maf_max %||% 0.5,
+      min_overlap_variants = esv$min_overlap_variants %||% 20L,
+      sd_tolerance = esv$sd_tolerance %||% 0.15,
+      warning_multiplier = esv$warning_multiplier %||% 2.0,
+      dispersion_max = esv$dispersion_max %||% 0.5
+    )
+  )
+}
+
 write_build_yaml <- function(cfg, root, release_dir, paths) {
   write_yaml_file(list(
     store_family_id = cfg$store_family_id,
@@ -347,7 +380,8 @@ write_build_yaml <- function(cfg, root, release_dir, paths) {
       association_coverage = cfg$association_coverage,
       ragged_region_policy = cfg$filter$region_policy_id
     ),
-    reference_resources = list(),
+    reference_resources = build_reference_resources_yaml(cfg),
+    effect_scale_validation = build_effect_scale_validation_yaml(cfg),
     validation = list(required = TRUE),
     artifacts = list(
       artifact_root = paths$artifact_root,
@@ -414,7 +448,8 @@ emit_bundle <- function(cfg, root) {
       analysis_targets = "sidecars/analysis_targets.tsv",
       sparse_regions = "sidecars/sparse_regions.tsv",
       filter_summary = "sidecars/filter_summary.tsv",
-      build_report = "sidecars/build_report.tsv"
+      build_report = "sidecars/build_report.tsv",
+      sd_estimation = "sidecars/sd_estimation.tsv"
     ),
     notes = cfg$notes %||% ""
   ), file.path(release_dir, "release.yaml"))
@@ -795,8 +830,68 @@ validate_emit <- function(cfg, root) {
   cat(sprintf("Release bundle schema smoke check passed for %d analyses\n", nrow(analyses)))
 }
 
+merge_validation_checks <- function(release_dir, checks, validator_name) {
+  path <- file.path(release_dir, "validation.yaml")
+  current <- if (file.exists(path)) read_yaml(path) else list(status = "not_run", checks = list())
+  current$checks$effect_scale <- checks$effect_scale
+  current$checks$sd_estimation <- checks$sd_estimation
+  existing_warnings <- current$warnings
+  if (!is.list(existing_warnings)) existing_warnings <- list()
+  current$warnings <- as.list(unique(c(unlist(existing_warnings), checks$warnings)))
+
+  status_rank <- c(not_run = 0L, passed = 1L, passed_with_warnings = 2L, failed = 3L)
+  check_values <- unlist(current$checks[!vapply(current$checks, is.null, logical(1))])
+  check_values <- check_values[check_values %in% names(status_rank)]
+  if (length(check_values)) {
+    current$status <- names(which.max(status_rank[check_values]))
+  }
+  current$validated_at <- format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC")
+  current$validator <- list(name = validator_name, version = NULL)
+  write_yaml_file(current, path)
+}
+
+set_sd_estimation_sidecar_pointer <- function(release_dir) {
+  path <- file.path(release_dir, "release.yaml")
+  if (!file.exists(path)) return(invisible())
+  current <- read_yaml(path)
+  if (is.null(current$sidecars)) current$sidecars <- list()
+  if (is.null(current$sidecars$sd_estimation)) {
+    current$sidecars$sd_estimation <- "sidecars/sd_estimation.tsv"
+    write_yaml_file(current, path)
+  }
+}
+
+effect_scale_stage <- function(cfg, root) {
+  release_dir <- path_abs(root, cfg$output$release_dir)
+  paths <- artifact_paths(cfg, root)
+  reference_resources <- resolve_reference_resources_from_config(cfg)
+  thresholds <- default_thresholds(cfg$effect_scale_validation)
+  result <- run_effect_scale_stage(release_dir, paths$filtered_dir, reference_resources, thresholds)
+  set_sd_estimation_sidecar_pointer(release_dir)
+  merge_validation_checks(
+    release_dir, result$checks,
+    "resources/generators/gwas-ssf-ragged/generate.R"
+  )
+  status_counts <- table(result$sidecar$status)
+  cat(sprintf(
+    "Effect-scale validation: %d analyses (%s); checks.effect_scale=%s checks.sd_estimation=%s\n",
+    nrow(result$sidecar),
+    paste(sprintf("%s=%d", names(status_counts), status_counts), collapse = ", "),
+    result$checks$effect_scale, result$checks$sd_estimation
+  ))
+  invisible(result)
+}
+
+refresh_build_mode <- function(cfg, root) {
+  release_dir <- path_abs(root, cfg$output$release_dir)
+  paths <- artifact_paths(cfg, root)
+  write_build_yaml(cfg, root, release_dir, paths)
+  cat(sprintf("Refreshed build.yaml for %s\n", release_dir))
+}
+
 args <- parse_args(commandArgs(trailingOnly = TRUE))
 root <- repo_root()
+source(path_abs(root, "resources/lib/effect_scale_validation.R"))
 cfg <- read_yaml(path_abs(root, args$config))
 cfg$.config_path <- args$config
 
@@ -810,6 +905,10 @@ if (args$mode == "emit") {
 } else if (args$mode == "refresh-artifacts") {
   refresh_artifact_paths(cfg, root)
   validate_emit(cfg, root)
+} else if (args$mode == "refresh-build") {
+  refresh_build_mode(cfg, root)
+} else if (args$mode == "effect-scale") {
+  effect_scale_stage(cfg, root)
 } else if (args$mode == "all") {
   emit_bundle(cfg, root)
   validate_emit(cfg, root)

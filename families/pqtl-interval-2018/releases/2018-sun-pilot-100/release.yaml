@@ -31,5 +31,8 @@ sidecars:
   sparse_regions: sidecars/sparse_regions.tsv
   filter_summary: sidecars/filter_summary.tsv
   build_report: sidecars/build_report.tsv
-notes: |
-  Pilot release for issue #9. The first 100 GWAS Catalog analyses are retained only when they have resolvable SomaScan or fallback Ensembl target coordinates; historical SeqId misses are retained via explicit target resolution evidence rather than silently dropped.
+  sd_estimation: sidecars/sd_estimation.tsv
+notes: 'Pilot release for issue #9. The first 100 GWAS Catalog analyses are retained
+  only when they have resolvable SomaScan or fallback Ensembl target coordinates;
+  historical SeqId misses are retained via explicit target resolution evidence rather
+  than silently dropped.'

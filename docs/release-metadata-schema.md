@@ -170,7 +170,8 @@ to the release.
 | `effects.stored_effect_scale` | Yes | Stored effect scale for the build: `sd`, `log_or`, or `log_hazard`. |
 | `shape.association_coverage` | Yes | Repeats the release association coverage for builder convenience. |
 | `shape.ragged_region_policy` | Optional | Named sparse-region policy for ragged releases. |
-| `reference_resources` | Optional | List of reference resources used for completion, ancestry assignment, MAF lookup, or validation. |
+| `reference_resources` | Optional | List of Reference Resource declarations used for completion, ancestry assignment, MAF lookup, or validation. See "Reference Resource declaration" below. |
+| `effect_scale_validation` | Optional | Reference-AF effect-scale validation configuration for this release. See "Effect-scale validation configuration" below. Absent or `enabled: false` means the release has not opted into empirical effect-scale validation, and `validation.yaml` `checks.effect_scale`/`checks.sd_estimation` should read `not_run` rather than imply a pass. |
 | `validation.required` | Yes | Whether validation is required before publishing the built store. |
 | `artifacts.artifact_root` | Optional | Configured root for large release artifacts outside this repository, such as `/data/opengwasdb`. |
 | `artifacts.release_subdir` | Optional | Release-specific artifact directory relative to `artifacts.artifact_root`, conventionally `<store-family-id>/releases/<family-release-id>`. |
@@ -178,6 +179,46 @@ to the release.
 | `artifacts.work_dir` | Optional | Directory for transient build/download files. |
 | `artifacts.store_uri` | Optional | URI for the built store artifact. |
 | `artifacts.build_log_uri` | Optional | URI for detailed build logs. |
+
+### Reference Resource declaration
+
+Each item in `build.yaml` `reference_resources` describes one auxiliary
+build-time resource (see ADR 0011). A reference-AF resource used for
+effect-scale validation should declare at least:
+
+| Field | Required | Description |
+|---|---:|---|
+| `resource_id` | Yes | Stable ID for this Reference Resource, referenced from `effect_scale_validation.reference_resources`. |
+| `kind` | Yes | `reference_af` for allele-frequency lookup resources; other kinds (for example LD panels) may reuse the same declaration shape. |
+| `ancestry` | Yes | Ancestry/population label the resource represents, matching the controlled `assigned_ancestry` vocabulary. |
+| `genome_build` | Yes | Genome build of the resource's coordinates. |
+| `variant_id_convention` | Yes | Variant identifier/allele convention used by the resource, for example `chr:pos_ref_alt`. |
+| `allele_columns` | Optional | Column-name mapping the resource uses for effect/other allele and frequency, for example `{effect: EA, other: OA, freq: EAF}`. |
+| `location` | Yes | External path or URI for the resource, outside this repository. |
+| `location_kind` | Optional | How to interpret `location`, for example `external_directory`. |
+
+Reference-AF resources are recorded here for provenance; the resource data
+itself lives under the configured artifact root or another external location,
+never inside this repository.
+
+### Effect-scale validation configuration
+
+`build.yaml` `effect_scale_validation` configures the reference-AF
+effect-scale validation stage (issue #16) for one release:
+
+| Field | Required | Description |
+|---|---:|---|
+| `enabled` | Yes | Whether this release opts into empirical effect-scale validation. |
+| `reference_resources` | Yes when enabled | List of `{ancestry, resource_id}` pairs mapping an assigned ancestry to a declared Reference Resource `resource_id`. Ancestries without an entry here produce an explicit `skipped` sidecar row rather than silently omitting evidence. |
+| `thresholds.maf_min` / `thresholds.maf_max` | Yes when enabled | Reference-MAF bounds a variant must fall within to be used for implied-SD estimation. |
+| `thresholds.min_overlap_variants` | Yes when enabled | Minimum number of safely aligned, in-bounds variants required before an Analysis is scored rather than skipped as `low_overlap`. |
+| `thresholds.sd_tolerance` | Yes when enabled | Maximum `abs(median implied SD - 1)` for a declared-standardised Analysis to pass. |
+| `thresholds.warning_multiplier` | Yes when enabled | Multiplier applied to `sd_tolerance` defining the boundary between a `warning` and a `failed` scale-inconsistency status. |
+| `thresholds.dispersion_max` | Yes when enabled | Maximum robust dispersion (median absolute deviation over median implied SD) before the result is downgraded to `warning` regardless of the central estimate. |
+
+Family generator configuration may set defaults for these thresholds and
+override them per release, per the Store Family's molecular or
+population-scale GWAS tolerances.
 
 ## `validation.yaml`
 
@@ -193,11 +234,11 @@ Release-level acceptance and build validation summary.
 | `checks.files` | Yes | Whether referenced source or filtered files exist and match checksums. |
 | `checks.reader_smoke_test` | Optional | Whether OpenGWASDB can read a small sample from each source file or bundle. |
 | `checks.ancestry` | Optional | Whether ancestry fields are valid and sidecar evidence is internally consistent. |
-| `checks.effect_scale` | Optional | Whether original/stored effect-scale fields are valid and conversion inputs are present. |
-| `checks.sd_estimation` | Optional | Whether SD-estimation fields and sidecar evidence are internally consistent. |
+| `checks.effect_scale` | Optional | `not_run` when the release has not opted into `effect_scale_validation`, or when it has opted in but reflects only controlled-vocabulary validity. Once a release opts in, this must reflect the empirical reference-AF/source-AF SD-estimation sidecar outcome across attempted Analyses (`passed`, `passed_with_warnings`, or `failed`), not merely that declared vocabulary values are valid. Vocabulary-only checks must not report `passed` as if empirical validation had run. |
+| `checks.sd_estimation` | Optional | `not_run` when SD-estimation was not attempted. Otherwise `passed` only when the sidecar is internally consistent (every attempted, warned, or failed Analysis has a matching sidecar row with required fields populated) and no attempted Analysis has status `failed`; `passed_with_warnings` when at least one Analysis has status `warning`, `skipped` for a reason that should be reviewed (for example `no_reference_resource_for_ancestry`), or `failed` otherwise. |
 | `checks.sparse_regions` | Optional | Whether ragged region sidecars match filtered files. |
 | `reports` | Optional | URIs or paths to detailed reports. |
-| `warnings` | Optional | List of non-blocking warnings. |
+| `warnings` | Optional | List of non-blocking warnings. Reference-AF effect-scale warnings should name the Analysis and reason, for example low reference-AF overlap, an allele mismatch, unstable implied SD, a missing reference resource for the assigned ancestry, or scale inconsistency versus the declared effect scale. |
 | `errors` | Optional | List of blocking errors. |
 
 ## Ancestry sidecar
@@ -229,24 +270,36 @@ required mapping.
 
 Suggested path: `sidecars/sd_estimation.tsv`.
 
-One row per Analysis where `original_sd_method` is an estimation method or where
-source-provided/declared standardisation evidence should be auditable.
+One row per Analysis whenever effect-scale validation was attempted, passed,
+warned, failed, or explicitly skipped. Skips are always explicit and reasoned;
+an Analysis with no source-provided or reference-derivable allele frequencies,
+no configured reference resource for its assigned ancestry, or a
+non-quantitative `stored_effect_scale` (`log_or`, `log_hazard`) still gets a
+row, with `status = skipped` and a `skip_reason`.
 
 | Field | Required | Description |
 |---|---:|---|
 | `analysis_id` | Yes | Registry Analysis ID matching `analyses.tsv`. |
 | `source_analysis_id` | Optional | Upstream analysis identifier, when the Source Collection provides one. |
-| `original_sd` | Optional | Resolved phenotype SD written to `analyses.tsv`. |
+| `status` | Yes | `passed`, `warning`, `failed`, or `skipped`. |
+| `skip_reason` | Optional | Reason code when `status = skipped`, for example `non_quantitative_effect_scale`, `no_retained_variants`, `no_reference_resource_for_ancestry`, or `low_overlap`. |
+| `af_source` | Optional | `source`, `reference`, or empty when no AF source was used (for example a skipped Analysis). Source-provided AF is preferred whenever usable; reference AF is a fallback used only when source AF is missing, empty, or otherwise unusable. |
+| `ancestry_reference_id` | Optional | Reference Resource `resource_id` used for reference MAF, when `af_source = reference`. |
+| `original_sd` | Optional | Resolved phenotype SD written to `analyses.tsv`. Left as the source-declared value (unchanged) for `original_sd_method = declared_standardised`; populated from the estimate for `estimated_from_source_maf` / `estimated_from_reference_maf` when diagnostics pass. |
 | `original_sd_method` | Yes | Same controlled value as `analyses.tsv`. |
-| `af_source` | Optional | `source`, `reference`, `assumed`, or empty when AF was not used. |
-| `ancestry_reference_id` | Optional | Reference panel used for reference MAF, when applicable. |
-| `n_variants_sampled` | Optional | Number of variants used by the estimator. |
+| `n_variants_considered` | Optional | Number of retained source rows examined for this Analysis. |
+| `n_variants_overlapping` | Optional | Number of considered variants with a same-position AF value available (source AF present, or a reference variant at that position). |
+| `n_variants_excluded_ambiguous` | Optional | Number of overlapping variants excluded because the allele pair was palindromic/strand-ambiguous. |
+| `n_variants_excluded_mismatch` | Optional | Number of overlapping variants excluded because the alleles did not correspond to the reference in either orientation, or were not a usable single-nucleotide pair. |
+| `n_variants_excluded_missing_af` | Optional | Number of source rows excluded because the source-provided allele-frequency value was missing or unusable (`af_source = source` only). |
+| `n_variants_excluded_maf` | Optional | Number of safely aligned variants excluded for falling outside `maf_min`/`maf_max`. |
+| `n_variants_retained` | Yes | Number of variants actually used to compute the implied-SD summary. |
 | `maf_min` | Optional | Minimum MAF bound used for variant selection. |
 | `maf_max` | Optional | Maximum MAF bound used for variant selection. |
-| `variant_sampling_policy` | Optional | Description or ID for the random/common-variant sampling policy. |
-| `sd_dispersion` | Optional | Dispersion diagnostic returned by the OpenGWASDB estimator. |
-| `estimator_version` | Optional | OpenGWASDB estimator version, package version, or git commit. |
-| `sd_notes` | Optional | Free-text notes for audit or review dashboards. |
+| `implied_sd_median` | Optional | Robust (median) summary of per-variant implied phenotype SD, computed from standard error, sample size, and MAF. |
+| `sd_dispersion` | Optional | Robust dispersion diagnostic (median absolute deviation over median) for implied-SD estimates across retained variants. |
+| `estimator_version` | Optional | Estimator package version, git commit, or script hash. |
+| `sd_notes` | Optional | Free-text notes for audit or review dashboards, including the reason for a `warning`/`failed` status. |
 
 ## Sparse-region sidecar
 

@@ -56,3 +56,36 @@ output:
   release_dir: families/pqtl-interval-2018/releases/2018-sun-pilot-100
   artifact_root: /data/opengwasdb
   artifact_subdir: pqtl-interval-2018/releases/2018-sun-pilot-100
+
+# Reference-AF effect-scale validation (issue #16, #22). The Sun 2018 GWAS-SSF
+# source carries an effect_allele_frequency column but its values are empty
+# for this pilot, so this Reference Resource is the fallback AF source used
+# to QC the declared `original_sd_method: declared_standardised` (protein
+# levels rank-inverse-normal transformed prior to GWAS, so implied SD should
+# be close to 1). It is conditional on the assigned European ancestry above;
+# it does not itself assign ancestry, which stays source_trusted_no_af.
+reference_resources:
+  - resource_id: ukb-hg38-eur-af
+    kind: reference_af
+    ancestry: European
+    genome_build: GRCh38
+    variant_id_convention: "chr:pos_ref_alt"
+    allele_columns:
+      effect: EA
+      other: OA
+      freq: EAF
+    root: /data/opengwasdb/reference/ukb-hg38
+    ancestry_dir: EUR
+    location_kind: external_directory
+
+effect_scale_validation:
+  enabled: true
+  maf_min: 0.01
+  maf_max: 0.5
+  min_overlap_variants: 20
+  sd_tolerance: 0.15
+  warning_multiplier: 2.0
+  dispersion_max: 0.5
+  reference_resources:
+    - ancestry: European
+      resource_id: ukb-hg38-eur-af
