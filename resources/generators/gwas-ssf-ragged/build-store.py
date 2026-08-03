@@ -75,6 +75,11 @@ def repo_root(start: Path) -> Path:
     return Path(result.stdout.strip())
 
 
+def resolve_path(root: Path, value: str) -> Path:
+    path = Path(value)
+    return path if path.is_absolute() else root / path
+
+
 def variant_lookup(store: Path) -> dict[int, tuple[str, int]]:
     out: dict[int, tuple[str, int]] = {}
     with gzip.open(store / "variants.tsv.gz", "rt", encoding="utf-8") as fh:
@@ -191,13 +196,17 @@ def main() -> None:
     analyses_path = release_dir / "analyses.tsv"
     rows = first_complete_manifest_rows(analyses_path)
 
-    filtered_dir = root / require_text(build, "artifacts", "filtered_dir")
+    filtered_dir = resolve_path(root, require_text(build, "artifacts", "filtered_dir"))
     if not filtered_dir.exists():
         raise SystemExit(f"Filtered directory does not exist: {filtered_dir}")
     store_id = require_text(release, "store_key") or (
         f"{require_text(release, 'store_family_id')}__{require_text(release, 'family_release_id')}"
     )
-    store_dir = Path(args.store_dir).resolve() if args.store_dir else root / require_text(build, "artifacts", "store_uri")
+    store_dir = (
+        Path(args.store_dir).resolve()
+        if args.store_dir
+        else resolve_path(root, require_text(build, "artifacts", "store_uri"))
+    )
     scale_map = {"sd": "sd_units", "log_or": "log_or", "log_hazard": "log_hazard"}
     stored_effect_scale = scale_map.get(require_text(build, "effects", "stored_effect_scale") or "sd", "sd_units")
 

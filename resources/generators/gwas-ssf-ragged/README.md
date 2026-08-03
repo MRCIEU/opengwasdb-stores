@@ -26,6 +26,8 @@ downloads each full harmonised GWAS-SSF file transiently, writes a filtered
 GWAS-SSF-shaped file containing the configured sparse regions, deletes the full
 download, and stamps checksums/sizes back into `analyses.tsv`. `build-store.py`
 passes the filtered files to OpenGWASDB and records a small read-back report.
+`refresh-artifacts` updates artifact paths in an existing release bundle after
+changing `output.artifact_root` or `output.artifact_subdir`.
 
 The sparse policy implemented here is:
 
@@ -37,5 +39,6 @@ The sparse policy implemented here is:
   `significant_p < p_value <= suggestive_p`, kept as distance-pruned lead
   variants only.
 
-Large filtered files and stores are written under `resources/data/` and are
-ignored by Git. The release bundle and small sidecars are tracked.
+Large filtered files, transient downloads, and stores are written under the
+configured `output.artifact_root` plus `output.artifact_subdir`. The release
+bundle and small sidecars are tracked in this repository.

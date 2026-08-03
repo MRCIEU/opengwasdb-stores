@@ -37,6 +37,35 @@ path_abs <- function(root, path) {
   else normalizePath(file.path(root, path), winslash = "/", mustWork = FALSE)
 }
 
+artifact_paths <- function(cfg, root) {
+  if (!is.null(cfg$output$artifact_root)) {
+    artifact_root <- path_abs(root, cfg$output$artifact_root)
+    artifact_subdir <- cfg$output$artifact_subdir
+    if (is.null(artifact_subdir) || !nzchar(artifact_subdir)) {
+      stop("output.artifact_subdir is required when output.artifact_root is set")
+    }
+    if (grepl("^/", artifact_subdir)) {
+      stop("output.artifact_subdir must be relative to output.artifact_root")
+    }
+    artifact_dir <- file.path(artifact_root, artifact_subdir)
+  } else if (!is.null(cfg$output$data_dir)) {
+    artifact_dir <- path_abs(root, cfg$output$data_dir)
+    artifact_root <- dirname(artifact_dir)
+    artifact_subdir <- basename(artifact_dir)
+  } else {
+    stop("Expected output.artifact_root/output.artifact_subdir or legacy output.data_dir")
+  }
+
+  list(
+    artifact_root = artifact_root,
+    artifact_subdir = artifact_subdir,
+    artifact_dir = artifact_dir,
+    filtered_dir = file.path(artifact_dir, "filtered"),
+    work_dir = file.path(artifact_dir, "work"),
+    store_uri = file.path(artifact_dir, "store", cfg$store_key)
+  )
+}
+
 clean_chr <- function(x) sub("^chr", "", as.character(x), ignore.case = TRUE)
 
 bucket_of <- function(gcst) {
@@ -200,7 +229,7 @@ summarise_targets <- function(targets, selected_ids, fail_unresolved = TRUE) {
   ), by = source_analysis_id]
 }
 
-manifest_rows <- function(cfg, selected, target_summary) {
+manifest_rows <- function(cfg, selected, target_summary, paths) {
   x <- merge(
     selected,
     target_summary,
@@ -211,10 +240,9 @@ manifest_rows <- function(cfg, selected, target_summary) {
   )
   setorder(x, analysis_index)
 
-  release_data_dir <- cfg$output$data_dir
   x[, gene_name_slug := slugify(gene_name)]
   x[, filtered_file := sprintf("%s_%s.filtered.tsv.gz", gene_name_slug, STUDY.ACCESSION)]
-  x[, source_file := file.path(release_data_dir, "filtered", filtered_file)]
+  x[, source_file := file.path(paths$filtered_dir, filtered_file)]
   x[, source_url := ssf_url(STUDY.ACCESSION, cfg$source$ftp_base)]
   x[, source_bundle_id := ""]
   x[, source_ancestry_label := ancestry_group]
@@ -295,6 +323,43 @@ manifest_rows <- function(cfg, selected, target_summary) {
   ans[]
 }
 
+write_build_yaml <- function(cfg, root, release_dir, paths) {
+  write_yaml_file(list(
+    store_family_id = cfg$store_family_id,
+    family_release_id = cfg$family_release_id,
+    store_layout = "ragged-observed",
+    completion_state = "observed-only",
+    builder = list(
+      package = "opengwasdb",
+      entrypoint = "opengwasdb.layouts.ragged.build_ssf:build_ragged_from_ssf"
+    ),
+    source = list(
+      source_format = "gwas-ssf",
+      source_reader_capability = "opengwasdb.gwas-ssf",
+      source_genome_build = cfg$defaults$source_genome_build
+    ),
+    normalisation = list(
+      target_reference_assembly = "GRCh38",
+      liftover = NULL
+    ),
+    effects = list(stored_effect_scale = cfg$defaults$stored_effect_scale),
+    shape = list(
+      association_coverage = cfg$association_coverage,
+      ragged_region_policy = cfg$filter$region_policy_id
+    ),
+    reference_resources = list(),
+    validation = list(required = TRUE),
+    artifacts = list(
+      artifact_root = paths$artifact_root,
+      release_subdir = paths$artifact_subdir,
+      filtered_dir = paths$filtered_dir,
+      work_dir = paths$work_dir,
+      store_uri = paths$store_uri,
+      build_log_uri = NULL
+    )
+  ), file.path(release_dir, "build.yaml"))
+}
+
 emit_bundle <- function(cfg, root) {
   inputs <- load_inputs(cfg, root)
   selected <- select_analyses(cfg, inputs$candidates)
@@ -303,7 +368,8 @@ emit_bundle <- function(cfg, root) {
     selected$STUDY.ACCESSION,
     cfg$selection$fail_if_target_unresolved %||% TRUE
   )
-  analyses <- manifest_rows(cfg, selected, target_summary)
+  paths <- artifact_paths(cfg, root)
+  analyses <- manifest_rows(cfg, selected, target_summary, paths)
 
   release_dir <- path_abs(root, cfg$output$release_dir)
   sidecar_dir <- file.path(release_dir, "sidecars")
@@ -353,37 +419,7 @@ emit_bundle <- function(cfg, root) {
     notes = cfg$notes %||% ""
   ), file.path(release_dir, "release.yaml"))
 
-  write_yaml_file(list(
-    store_family_id = cfg$store_family_id,
-    family_release_id = cfg$family_release_id,
-    store_layout = "ragged-observed",
-    completion_state = "observed-only",
-    builder = list(
-      package = "opengwasdb",
-      entrypoint = "opengwasdb.layouts.ragged.build_ssf:build_ragged_from_ssf"
-    ),
-    source = list(
-      source_format = "gwas-ssf",
-      source_reader_capability = "opengwasdb.gwas-ssf",
-      source_genome_build = cfg$defaults$source_genome_build
-    ),
-    normalisation = list(
-      target_reference_assembly = "GRCh38",
-      liftover = NULL
-    ),
-    effects = list(stored_effect_scale = cfg$defaults$stored_effect_scale),
-    shape = list(
-      association_coverage = cfg$association_coverage,
-      ragged_region_policy = cfg$filter$region_policy_id
-    ),
-    reference_resources = list(),
-    validation = list(required = TRUE),
-    artifacts = list(
-      filtered_dir = file.path(cfg$output$data_dir, "filtered"),
-      store_uri = file.path(cfg$output$data_dir, "store", cfg$store_key),
-      build_log_uri = NULL
-    )
-  ), file.path(release_dir, "build.yaml"))
+  write_build_yaml(cfg, root, release_dir, paths)
 
   write_yaml_file(list(
     status = "not_run",
@@ -405,6 +441,35 @@ emit_bundle <- function(cfg, root) {
 
   cat(sprintf("Emitted %d analyses to %s\n", nrow(analyses), release_dir))
   invisible(analyses)
+}
+
+refresh_artifact_paths <- function(cfg, root) {
+  release_dir <- path_abs(root, cfg$output$release_dir)
+  paths <- artifact_paths(cfg, root)
+  analyses_path <- file.path(release_dir, "analyses.tsv")
+  if (!file.exists(analyses_path)) stop("Missing analyses.tsv: ", analyses_path)
+
+  analyses <- fread(analyses_path, sep = "\t", na.strings = "")
+  if (!"filtered_file" %in% names(analyses)) {
+    stop("analyses.tsv must contain filtered_file to refresh artifact paths")
+  }
+  analyses[, source_file := file.path(paths$filtered_dir, filtered_file)]
+  fwrite(analyses, analyses_path, sep = "\t", na = "")
+
+  summary_path <- file.path(release_dir, "sidecars", "filter_summary.tsv")
+  if (file.exists(summary_path)) {
+    summary <- fread(summary_path, sep = "\t", na.strings = "")
+    source_files <- analyses$source_file
+    names(source_files) <- analyses$analysis_id
+    if ("output_file" %in% names(summary)) {
+      summary[, output_file := source_files[analysis_id]]
+      fwrite(summary, summary_path, sep = "\t", na = "")
+    }
+  }
+
+  write_build_yaml(cfg, root, release_dir, paths)
+  cat(sprintf("Refreshed artifact paths under %s\n", paths$artifact_dir))
+  invisible(paths)
 }
 
 region_counts <- function(ssf_rows, ranges) {
@@ -623,8 +688,9 @@ filter_release <- function(cfg, root, max_analyses = NA_integer_, only_analysis_
   if (!is.na(max_analyses)) todo <- todo[seq_len(min(max_analyses, .N))]
   partial_run <- !is.na(max_analyses) || nzchar(only_analysis_id)
 
-  filtered_dir <- path_abs(root, file.path(cfg$output$data_dir, "filtered"))
-  work_dir <- path_abs(root, file.path(cfg$output$data_dir, "work"))
+  paths <- artifact_paths(cfg, root)
+  filtered_dir <- paths$filtered_dir
+  work_dir <- paths$work_dir
   summaries <- list()
   ranges <- list()
   for (i in seq_len(nrow(todo))) {
@@ -740,6 +806,9 @@ if (args$mode == "emit") {
 } else if (args$mode == "filter") {
   filter_release(cfg, root, args$max_analyses, args$only_analysis_id)
 } else if (args$mode == "validate") {
+  validate_emit(cfg, root)
+} else if (args$mode == "refresh-artifacts") {
+  refresh_artifact_paths(cfg, root)
   validate_emit(cfg, root)
 } else if (args$mode == "all") {
   emit_bundle(cfg, root)
