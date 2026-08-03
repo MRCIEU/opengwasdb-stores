@@ -10,7 +10,8 @@ molecular GWAS-SSF ragged stores; only this family's inputs differ, held here as
 
 - `config.yaml` — the analyte selection (GWAS Catalog accessions), the
   authoritative gene / cis-coordinate source (SomaScan SeqId → gene → GRCh38 via
-  Ensembl REST), the per-analysis metadata (N, ancestry, effect scale = sd_units,
+  `../resources/somascan-targets.tsv`), the per-analysis metadata (N, ancestry,
+  effect scale = sd,
   tissue), and the sparse-region filter policy (cis ±1 Mb; significant trans
   p≤5e-8, merged ±1 Mb; suggestive p≤1e-5, lead SNPs only; MHC analytes flagged).
 - `generate.R` — a one-call driver that runs the shared engine with `config.yaml`
