@@ -265,6 +265,39 @@ reference's super-population codes (for example `AFR`, `AMR`, `EAS`, `EUR`,
 distinct, and a reviewer comparing them should expect a translation, recorded
 per-Analysis in the ancestry sidecar's `source_assigned_mismatch`.
 
+### QC panel configuration
+
+`build.yaml` `filter.qc_panel` configures unconditional retention of the fixed
+QC variant panel (issue #28/#29/#30) for one release. Unlike the signal-driven
+sparse regions (`cis`/`significant_trans`/`suggestive_trans`), the QC panel is
+retained regardless of an Analysis's `p_value` distribution, so ancestry
+assignment and reference-AF effect-scale validation have a stable variant
+backbone even for Analyses with few or no genome-wide-significant hits:
+
+| Field | Required | Description |
+|---|---:|---|
+| `enabled` | Yes | Whether this release retains the QC panel in every Analysis's filtered file. |
+| `resource_id` | Yes when enabled | `resource_id` of the declared `kind: qc_panel` Reference Resource to retain (see "Reference Resource declaration"). |
+
+QC-panel retention is purely additive: a Store Family that does not configure
+`filter.qc_panel` behaves exactly as before this issue, and enabling it for
+one family never changes another's filtered output. Retained QC-panel rows
+are recorded in the sparse-region sidecar with `region_kind: qc_panel` (one
+row per chromosome the panel actually matched in that Analysis's source file,
+spanning the matched positions), distinct from the signal-driven region
+kinds, and `sidecars/filter_summary.tsv` gets a `qc_panel_rows` count per
+Analysis (`0` for families that do not configure a panel).
+
+Effect-scale validation (issue #16) and ancestry assignment (issue #23/#25)
+deliberately do not distinguish QC-panel rows from signal-driven rows when
+choosing which retained variants to use for AF/SD computations — both
+continue to consume every retained row with usable allele-frequency data
+uniformly. Retaining the QC panel already directly grows that pool for
+low-power Analyses; preferring QC-panel rows exclusively would need to
+discard perfectly good signal-driven rows for well-powered Analyses, for no
+demonstrated ascertainment benefit. This can be revisited if evidence of an
+ascertainment problem emerges, but is not assumed by default.
+
 ## `validation.yaml`
 
 Release-level acceptance and build validation summary.
@@ -356,7 +389,7 @@ One row per retained region for ragged stores.
 |---|---:|---|
 | `analysis_id` | Yes | Registry Analysis ID matching `analyses.tsv`. |
 | `region_id` | Yes | Stable region identifier within the Analysis. |
-| `region_kind` | Yes | Controlled value such as `cis`, `significant_trans`, `suggestive_trans`, or `manual`. |
+| `region_kind` | Yes | Controlled value such as `cis`, `significant_trans`, `suggestive_trans`, `qc_panel`, or `manual`. `qc_panel` rows (issue #28/#30) mark the fixed QC panel's positions retained unconditionally, regardless of significance, when a Store Family configures `filter.qc_panel`; unlike the signal-driven kinds, `pvalue_threshold`/`lead_variant_id`/`target_id` are not applicable and are left blank. |
 | `chromosome` | Yes | Chromosome name in source coordinates. |
 | `start` | Yes | 1-based inclusive region start. |
 | `end` | Yes | 1-based inclusive region end. |

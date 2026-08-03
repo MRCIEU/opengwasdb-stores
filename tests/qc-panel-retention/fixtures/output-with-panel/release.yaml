@@ -1,19 +1,19 @@
 metadata_schema_version: 1.0
-store_family_id: fixture-no-cis
-family_release_id: fixture-release
+store_family_id: fixture-qc-panel
+family_release_id: fixture-release-with-panel
 store_key: ragged__pmid-99999999__European
 status: candidate
 source_collection_id: fixture
 source_snapshot_id: fixture
 release_kind: one-off
 association_coverage: signals_only
-description: Fixture release proving the no-cis sparse-region policy (issue
-created_at: '2026-08-03T23:52:52Z'
+description: Fixture release proving unconditional QC-panel retention (issue
+created_at: '2026-08-03T23:52:56Z'
 accepted_at: ~
 generator:
   name: resources/generators/gwas-ssf-ragged/generate.R
   version: sha256:d48e94f4170c4e91a8713c2891d4da46399ae53fed26867c2a40d86cc72b2dfe
-  command: Rscript resources/generators/gwas-ssf-ragged/generate.R --config=/tmp/RtmpDv7vIf/file2126d977f3454f.yaml
+  command: Rscript resources/generators/gwas-ssf-ragged/generate.R --config=/tmp/Rtmp1rWWk3/file212b4019735e36.yaml
     --mode=emit
 source_defaults:
   source_genome_build: GRCh38
@@ -31,4 +31,4 @@ sidecars:
   build_report: sidecars/build_report.tsv
   sd_estimation: sidecars/sd_estimation.tsv
   ancestry: sidecars/ancestry.tsv
-notes: No gene target for this family; only significant/suggestive regions are retained.
+notes: Zero significant/suggestive hits; only filter.qc_panel should retain anything.

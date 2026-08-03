@@ -1,5 +1,5 @@
-store_family_id: fixture-no-cis
-family_release_id: fixture-release
+store_family_id: fixture-qc-panel
+family_release_id: fixture-release-without-panel
 store_layout: ragged-observed
 completion_state: observed-only
 builder:
@@ -24,9 +24,9 @@ qc_panel: ~
 validation:
   required: yes
 artifacts:
-  artifact_root: /home/gh13047/repo/opengwasdb-stores/tests/no-cis-region-policy/fixtures
-  release_subdir: output
-  filtered_dir: /home/gh13047/repo/opengwasdb-stores/tests/no-cis-region-policy/fixtures/output/filtered
-  work_dir: /home/gh13047/repo/opengwasdb-stores/tests/no-cis-region-policy/fixtures/output/work
-  store_uri: /home/gh13047/repo/opengwasdb-stores/tests/no-cis-region-policy/fixtures/output/store/ragged__pmid-99999999__European
+  artifact_root: /home/gh13047/repo/opengwasdb-stores/tests/qc-panel-retention/fixtures
+  release_subdir: output-without-panel
+  filtered_dir: /home/gh13047/repo/opengwasdb-stores/tests/qc-panel-retention/fixtures/output-without-panel/filtered
+  work_dir: /home/gh13047/repo/opengwasdb-stores/tests/qc-panel-retention/fixtures/output-without-panel/work
+  store_uri: /home/gh13047/repo/opengwasdb-stores/tests/qc-panel-retention/fixtures/output-without-panel/store/ragged__pmid-99999999__European
   build_log_uri: ~
