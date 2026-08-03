@@ -6,12 +6,35 @@ suppressPackageStartupMessages({
 })
 
 repo_root <- normalizePath(getwd(), mustWork = TRUE)
-family_dir <- file.path(repo_root, "families/pqtl-interval-2018")
-resources_dir <- file.path(family_dir, "resources")
+parse_args <- function(args) {
+  out <- list()
+  for (arg in args) {
+    if (!grepl("^--[^=]+=", arg)) {
+      stop("Arguments must use --name=value form: ", arg, call. = FALSE)
+    }
+    key <- sub("^--([^=]+)=.*$", "\\1", arg)
+    key <- gsub("-", "_", key)
+    value <- sub("^--[^=]+=", "", arg)
+    out[[key]] <- value
+  }
+  out
+}
 
-candidate_path <- file.path(repo_root, "resources/data/derived/store-candidates-analyses.tsv")
-somascan_targets_path <- file.path(resources_dir, "somascan-targets.tsv")
-out_path <- file.path(resources_dir, "sun-2018-analysis-targets.tsv")
+args <- parse_args(commandArgs(trailingOnly = TRUE))
+
+`%||%` <- function(x, y) {
+  if (is.null(x) || !length(x) || is.na(x) || !nzchar(x)) y else x
+}
+
+candidate_path <- args$input %||%
+  file.path(repo_root, "resources/data/derived/store-candidates-analyses.tsv")
+somascan_targets_path <- args$somascan_targets %||%
+  file.path(repo_root, "resources/somascan/somascan-targets.tsv")
+pubmed_id <- args$pubmed_id %||% "29875488"
+selected_store_key <- args$store_key %||% NA_character_
+out_path <- args$output %||%
+  file.path(repo_root, "resources/somascan/sun-2018-analysis-targets.tsv")
+dir.create(dirname(out_path), recursive = TRUE, showWarnings = FALSE)
 
 if (!file.exists(candidate_path)) {
   stop("Missing candidate analyses table: ", candidate_path, call. = FALSE)
@@ -113,13 +136,24 @@ fetch_biomart_symbols <- function(symbols) {
   stop(last_error)
 }
 
-sun <- fread(candidate_path, sep = "\t", na.strings = "")[PUBMED.ID == 29875488]
-sun[, `:=`(
+analyses <- fread(candidate_path, sep = "\t", na.strings = "")
+if (!is.na(pubmed_id)) {
+  analyses <- analyses[PUBMED.ID == as.integer(pubmed_id)]
+}
+if (!is.na(selected_store_key)) {
+  analyses <- analyses[store_key == selected_store_key]
+}
+if (!nrow(analyses)) {
+  stop("No analyses selected from ", candidate_path, call. = FALSE)
+}
+
+selected <- analyses
+selected[, `:=`(
   source_analysis_id = STUDY.ACCESSION,
   source_target_symbol = parse_trait_symbol(DISEASE.TRAIT),
   source_seqid = parse_seqid(DISEASE.TRAIT)
 )]
-sun <- sun[, .(
+selected <- selected[, .(
   source_analysis_id,
   source_seqid,
   source_target_symbol,
@@ -132,7 +166,7 @@ soma <- fread(somascan_targets_path, sep = "\t", na.strings = "")
 soma <- soma[is_primary_chromosome == TRUE & mapping_status == "mapped_to_ensembl"]
 soma[, source_seqid := seqid]
 
-direct <- merge(sun, soma, by = "source_seqid", allow.cartesian = TRUE)
+direct <- merge(selected, soma, by = "source_seqid", allow.cartesian = TRUE)
 direct[, `:=`(
   target_resolution_method = "somascan_db_seqid",
   matched_seqid = seqid,
@@ -140,7 +174,7 @@ direct[, `:=`(
 )]
 
 direct_ids <- unique(direct$source_analysis_id)
-needs_fallback <- sun[!source_analysis_id %in% direct_ids]
+needs_fallback <- selected[!source_analysis_id %in% direct_ids]
 
 soma_symbol <- copy(soma)
 soma_symbol[, source_target_symbol := gene_name]
@@ -164,17 +198,31 @@ fallback_ids <- unique(symbol_from_soma$source_analysis_id)
 needs_ensembl <- needs_fallback[!source_analysis_id %in% fallback_ids]
 
 message(sprintf(
-  "Resolving %s Sun target symbols through Ensembl BioMart...",
+  "Resolving %s target symbols through Ensembl BioMart...",
   uniqueN(needs_ensembl$source_target_symbol)
 ))
-symbol_batches <- split(
-  sort(unique(needs_ensembl$source_target_symbol)),
-  ceiling(seq_along(sort(unique(needs_ensembl$source_target_symbol))) / 200L)
-)
-ensembl_symbols <- rbindlist(lapply(seq_along(symbol_batches), function(i) {
-  message(sprintf("  symbol batch %s/%s", i, length(symbol_batches)))
-  fetch_biomart_symbols(symbol_batches[[i]])
-}), fill = TRUE)
+symbols_to_resolve <- sort(unique(needs_ensembl$source_target_symbol))
+if (length(symbols_to_resolve)) {
+  symbol_batches <- split(
+    symbols_to_resolve,
+    ceiling(seq_along(symbols_to_resolve) / 200L)
+  )
+  ensembl_symbols <- rbindlist(lapply(seq_along(symbol_batches), function(i) {
+    message(sprintf("  symbol batch %s/%s", i, length(symbol_batches)))
+    fetch_biomart_symbols(symbol_batches[[i]])
+  }), fill = TRUE)
+} else {
+  ensembl_symbols <- data.table(
+    source_target_symbol = character(),
+    ensembl_gene_id = character(),
+    gene_name = character(),
+    chromosome = character(),
+    gene_start = integer(),
+    gene_end = integer(),
+    strand = integer(),
+    gene_biotype = character()
+  )
+}
 ensembl_symbols <- unique(ensembl_symbols)
 ensembl_symbols[, `:=`(
   genome_build = "GRCh38",
@@ -217,7 +265,7 @@ resolved_ids <- unique(c(
   symbol_from_soma$source_analysis_id,
   symbol_from_ensembl$source_analysis_id
 ))
-unresolved <- sun[!source_analysis_id %in% resolved_ids]
+unresolved <- selected[!source_analysis_id %in% resolved_ids]
 if (nrow(unresolved)) {
   unresolved[, `:=`(
     seqid = NA_character_,
@@ -287,7 +335,7 @@ out <- out[, .(
 setorder(out, source_analysis_id, gene_name, ensembl_gene_id)
 fwrite(out, out_path, sep = "\t", na = "")
 
-message(sprintf("Wrote %s rows for %s Sun analyses to %s",
-                nrow(out), uniqueN(sun$source_analysis_id), out_path))
+message(sprintf("Wrote %s rows for %s analyses to %s",
+                nrow(out), uniqueN(selected$source_analysis_id), out_path))
 print(out[, .(n_rows = .N, n_analyses = uniqueN(source_analysis_id)),
           by = target_resolution_method][order(target_resolution_method)])

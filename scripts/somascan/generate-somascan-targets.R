@@ -6,7 +6,7 @@ suppressPackageStartupMessages({
 })
 
 repo_root <- normalizePath(file.path(getwd()), mustWork = TRUE)
-out_dir <- file.path(repo_root, "families/pqtl-interval-2018/resources")
+out_dir <- file.path(repo_root, "resources/somascan")
 dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 
 somascan_db_url <- Sys.getenv(
