@@ -3,6 +3,11 @@
 This document drafts the metadata files emitted by a Store Family Manifest
 Generator for an accepted Store Release bundle.
 
+OpenGWASDB owns the shared interpretation-bearing `analyses.tsv` core schema as
+part of its store-format contract. This registry emits manifests that conform to
+that core schema, while adding registry-only columns needed to locate source
+inputs, audit release selection, and rebuild a Store Release.
+
 The schema is intentionally simple:
 
 - `release.yaml` records store-level identity, source snapshot, release defaults,
@@ -26,9 +31,28 @@ families/<store-family-id>/releases/<family-release-id>/
 |---|---|---|---|
 | `discover` | Snapshot available upstream analyses and files. | Source inventory, GWAS Catalog studies table, source `meta.yaml`, provider APIs. | Raw candidate records and source-file locations. |
 | `select` | Apply Store Family inclusion rules. | Candidate records, family config, priority lists, publication/analyte filters. | Selected Analysis set for a proposed Store Release. |
-| `derive` | Add generated analytical metadata. | Selected rows, source files, OpenGWASDB readers, reference resources, Ensembl, checksums. | Resolved `analyses.tsv` columns and sidecar evidence. |
+| `derive` | Add authoritative analytical metadata and generated evidence. | Selected rows, provider metadata resolvers, source files, OpenGWASDB readers, reference resources, Ensembl, checksums. | Resolved `analyses.tsv` columns and sidecar evidence. |
 | `emit` | Write a reproducible release bundle. | Resolved rows, sidecars, build choices, generator provenance. | `release.yaml`, `analyses.tsv`, `build.yaml`, `validation.yaml`, sidecars. |
 | `accept` | Check that the bundle is complete enough to build. | Release bundle, schema checks, lightweight source/readability checks. | Updated `validation.yaml` and release status. |
+
+Metadata resolution and summary-statistics reading are orthogonal concerns. A
+Source Collection chooses a provider-specific metadata resolver for study tables,
+APIs, or endpoint manifests, and separately declares an OpenGWASDB Source Reader
+Capability for source data. The resolved metadata shape is common even when the
+provider and source format differ.
+
+## Column classes
+
+`analyses.tsv` spans three column classes:
+
+| Class | Owner | Where used | Examples |
+|---|---|---|---|
+| Shared core | OpenGWASDB | Release manifests and built stores. These columns carry interpretation-bearing Analysis metadata. | `analysis_id`, `source_label`, ontology fields, ancestry fields, effect-scale fields, sample-size fields. |
+| Registry-only | Store registry | Release manifests only. These columns locate source inputs, record provenance, or explain inclusion. | `source_analysis_id`, `source_file`, `source_bundle_id`, `checksum`, `checksum_algorithm`, `size_bytes`, `license`, publication metadata, `analysis_group_id`, `inclusion_reason`, `exclude_from_build`. |
+| Store-only | OpenGWASDB | Built stores only. These columns are produced during or after the build and therefore do not appear in accepted release manifests. | `completed_against`, reference-completion quality rollups, store artifact diagnostics. |
+
+Builders may ignore registry-only columns after using them to locate inputs.
+Store-only columns must not be required before the build has run.
 
 ## `release.yaml`
 
@@ -54,12 +78,13 @@ release bundle; candidate bundles may leave lifecycle timestamps null.
 | `source_defaults.source_genome_build` | Yes | Default genome build for source files if not overridden in `analyses.tsv`. |
 | `source_defaults.license` | Yes | Default source licence if not overridden in `analyses.tsv`. |
 | `source_defaults.original_effect_scale` | Optional | Default original effect scale if constant across the release. |
-| `source_defaults.stored_effect_scale` | Yes | Stored effect scale for OpenGWASDB. This should be `sd`. |
+| `source_defaults.stored_effect_scale` | Yes | Default stored effect scale for OpenGWASDB when constant across the release: `sd`, `log_or`, or `log_hazard`. |
 | `source_defaults.sample_size_kind` | Optional | Default sample-size kind if constant across the release. |
 | `source_defaults.source_ancestry_label` | Optional | Default source ancestry label if constant across the release. |
 | `source_defaults.assigned_ancestry` | Optional | Default assigned ancestry if constant across the release. |
 | `lineage.derived_from` | Optional | Parent release ID or URI when this release derives from another release. |
 | `sidecars.ancestry` | Optional | Path to ancestry evidence sidecar. |
+| `sidecars.sd_estimation` | Optional | Path to phenotype-SD estimation evidence sidecar. |
 | `sidecars.sparse_regions` | Optional | Path to sparse-region sidecar. |
 | `sidecars.derivations` | Optional | Path to general derivation or curation sidecar. |
 | `notes` | Optional | Free-text release notes. |
@@ -67,10 +92,22 @@ release bundle; candidate bundles may leave lifecycle timestamps null.
 ## `analyses.tsv`
 
 One row per Analysis. Values should be resolved after applying `release.yaml`
-defaults, even when that repeats store-level metadata. This makes the table
-streamable, diffable, and directly consumable by builders.
+defaults, even when that repeats store-level metadata. This includes fields that
+are often constant across a store, such as stored effect scale and sample-size
+semantics. The table should be streamable, diffable, and directly consumable by
+builders.
 
 Use empty strings for unknown optional values in TSV.
+
+Accepted build rows must have usable sample-size metadata. Analyses with unknown
+sample size may appear in Source Inventories, candidate diagnostics, or review
+sidecars, but should not be included as buildable rows in an accepted
+`analyses.tsv`.
+
+Case/control-style counts are required when `stored_effect_scale = log_or` or
+`stored_effect_scale = log_hazard`. For time-to-event traits, `n_cases` is the
+event count and `n_controls` is the non-event or comparison count reported by
+the source.
 
 | Field | Required | Description |
 |---|---:|---|
@@ -94,13 +131,13 @@ Use empty strings for unknown optional values in TSV.
 | `ancestry_assignment_method` | Yes | Controlled value: `af_assigned`, `source_fallback`, `source_trusted_no_af`, or `unassigned`. |
 | `original_effect_scale` | Yes | Controlled value for upstream effect units, such as `sd`, `cm`, `logOR`, or another approved vocabulary item. |
 | `original_sd` | Optional | Source-provided or estimated phenotype SD on the original scale. Empty for binary traits or unavailable values. |
-| `original_sd_method` | Yes | Controlled value describing `original_sd`: `source_provided`, `estimated_from_source_maf`, `estimated_from_reference_maf`, `binary_trait`, or `unavailable`. |
-| `stored_effect_scale` | Yes | Effect scale stored by OpenGWASDB. This should be `sd`. |
-| `sample_size_kind` | Yes | `total`, `case_control`, `effective`, `variant_level`, or `unknown`. |
-| `sample_size_scope` | Yes | `analysis_level`, `variant_level`, or `unknown`. |
-| `sample_size` | Optional | Total or effective sample size when a scalar value is valid. |
-| `n_cases` | Optional | Case count for binary traits. |
-| `n_controls` | Optional | Control count for binary traits. |
+| `original_sd_method` | Yes | Controlled value describing `original_sd`: `declared_standardised`, `source_provided`, `estimated_from_source_maf`, `estimated_from_reference_maf`, `estimated_from_beta_distribution`, `binary_trait`, or `unavailable`. |
+| `stored_effect_scale` | Yes | Controlled value for the effect scale stored by OpenGWASDB for this Analysis: `sd`, `log_or`, or `log_hazard`. |
+| `sample_size_kind` | Yes | `total`, `case_control`, `effective`, or `variant_level`. Accepted build rows must not use `unknown`. |
+| `sample_size_scope` | Yes | `analysis_level` or `variant_level`. Use `variant_level` when N differs per SNP in the source file. |
+| `sample_size` | Yes | Scalar study N for this Analysis. When source N differs per SNP, use the study's maximum N. |
+| `n_cases` | Optional | Case count for binary traits, or event count for time-to-event traits. Required when `stored_effect_scale = log_or` or `log_hazard`. |
+| `n_controls` | Optional | Control count for binary traits, or non-event/comparison count for time-to-event traits when reported by the source. Required when `stored_effect_scale = log_or` or `log_hazard`. |
 | `analysis_group_id` | Optional | Grouping key for analyses sharing a publication, analyte panel, phenotype batch, or source bundle. |
 | `inclusion_reason` | Optional | Short family-specific reason this Analysis was selected. |
 | `exclude_from_build` | Optional | `true` only for rows retained for audit but intentionally skipped by the build. Accepted build inputs normally omit excluded rows. |
@@ -123,7 +160,7 @@ to the release.
 | `source.source_reader_capability` | Yes | OpenGWASDB reader capability for the Source Collection. |
 | `normalisation.target_reference_assembly` | Yes | Target reference assembly for stored coordinates. |
 | `normalisation.liftover` | Optional | Liftover policy or chain when source and target assemblies differ. |
-| `effects.stored_effect_scale` | Yes | Stored effect scale. This should be `sd`. |
+| `effects.stored_effect_scale` | Yes | Stored effect scale for the build: `sd`, `log_or`, or `log_hazard`. |
 | `shape.association_coverage` | Yes | Repeats the release association coverage for builder convenience. |
 | `shape.ragged_region_policy` | Optional | Named sparse-region policy for ragged releases. |
 | `reference_resources` | Optional | List of reference resources used for completion, ancestry assignment, MAF lookup, or validation. |
@@ -141,11 +178,12 @@ Release-level acceptance and build validation summary.
 | `validated_at` | Optional | Timestamp of the latest validation run. |
 | `validator.name` | Optional | Validator script, package, or workflow name. |
 | `validator.version` | Optional | Validator version, git commit, or script hash. |
-| `checks.schema` | Yes | Whether required files and fields are present with valid controlled values. |
+| `checks.schema` | Yes | Whether required files and fields conform to OpenGWASDB's shared core schema and this registry's release-bundle requirements. |
 | `checks.files` | Yes | Whether referenced source or filtered files exist and match checksums. |
 | `checks.reader_smoke_test` | Optional | Whether OpenGWASDB can read a small sample from each source file or bundle. |
 | `checks.ancestry` | Optional | Whether ancestry fields are valid and sidecar evidence is internally consistent. |
 | `checks.effect_scale` | Optional | Whether original/stored effect-scale fields are valid and conversion inputs are present. |
+| `checks.sd_estimation` | Optional | Whether SD-estimation fields and sidecar evidence are internally consistent. |
 | `checks.sparse_regions` | Optional | Whether ragged region sidecars match filtered files. |
 | `reports` | Optional | URIs or paths to detailed reports. |
 | `warnings` | Optional | List of non-blocking warnings. |
@@ -161,7 +199,7 @@ required mapping.
 | Field | Required | Description |
 |---|---:|---|
 | `analysis_id` | Yes | Registry Analysis ID matching `analyses.tsv`. |
-| `source_analysis_id` | Yes | Upstream analysis identifier. |
+| `source_analysis_id` | Optional | Upstream analysis identifier, when the Source Collection provides one. |
 | `source_ancestry_label` | Optional | Upstream ancestry label. |
 | `assigned_ancestry` | Optional | Final assigned ancestry used for routing. |
 | `ancestry_assignment_method` | Yes | Same controlled value as `analyses.tsv`. |
@@ -175,6 +213,29 @@ required mapping.
 | `ancestry_prop_*` | Optional | Optional family of columns for estimated reference ancestry proportions. |
 | `source_assigned_mismatch` | Optional | `true` when source label and AF-based assignment disagree. |
 | `ancestry_notes` | Optional | Free-text notes for review dashboards. |
+
+## SD-estimation sidecar
+
+Suggested path: `sidecars/sd_estimation.tsv`.
+
+One row per Analysis where `original_sd_method` is an estimation method or where
+source-provided/declared standardisation evidence should be auditable.
+
+| Field | Required | Description |
+|---|---:|---|
+| `analysis_id` | Yes | Registry Analysis ID matching `analyses.tsv`. |
+| `source_analysis_id` | Optional | Upstream analysis identifier, when the Source Collection provides one. |
+| `original_sd` | Optional | Resolved phenotype SD written to `analyses.tsv`. |
+| `original_sd_method` | Yes | Same controlled value as `analyses.tsv`. |
+| `af_source` | Optional | `source`, `reference`, `assumed`, or empty when AF was not used. |
+| `ancestry_reference_id` | Optional | Reference panel used for reference MAF, when applicable. |
+| `n_variants_sampled` | Optional | Number of variants used by the estimator. |
+| `maf_min` | Optional | Minimum MAF bound used for variant selection. |
+| `maf_max` | Optional | Maximum MAF bound used for variant selection. |
+| `variant_sampling_policy` | Optional | Description or ID for the random/common-variant sampling policy. |
+| `sd_dispersion` | Optional | Dispersion diagnostic returned by the OpenGWASDB estimator. |
+| `estimator_version` | Optional | OpenGWASDB estimator version, package version, or git commit. |
+| `sd_notes` | Optional | Free-text notes for audit or review dashboards. |
 
 ## Sparse-region sidecar
 

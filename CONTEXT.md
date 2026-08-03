@@ -6,6 +6,7 @@ This context describes the planning and operational language for expected and pr
 
 **Store Registry**:
 The authoritative record of intended and produced Store Releases, including their identity, source inputs, build recipes, release lineage, and operational priority.
+OpenGWASDB's former Analysis Catalogue model is superseded by this registry boundary and by OpenGWASDB-owned store metadata carried with each built Store Release.
 _Avoid_: catalogue, service catalogue
 
 **Access Posture**:
@@ -57,7 +58,7 @@ A standardised, declarative, accepted bundle describing the concrete Analyses, T
 _Avoid_: study list, input list
 
 **Analysis**:
-One statistical analysis of one Trait, producing associations between that Trait and variants. Every Analysis in a Release Manifest has a stable registry analysis ID and a trait ID.
+One statistical analysis of one Trait, producing associations between that Trait and variants. Every Analysis in a Release Manifest has a stable registry analysis ID and source or ontology metadata describing the analysed Trait where available.
 _Avoid_: dataset, trait, phenotype
 
 **Source Analysis ID**:
@@ -125,7 +126,7 @@ Metadata that affects the interpretation of association statistics in a Store Re
 _Avoid_: trait annotation, display metadata
 
 **Effect Scale**:
-The OpenGWASDB controlled vocabulary value describing the scale of stored effects for an Analysis, such as `sd_units`, `log_or`, or `log_hazard`.
+The OpenGWASDB controlled vocabulary value describing the scale of stored effects for an Analysis, such as `sd`, `log_or`, or `log_hazard`.
 _Avoid_: source effect label
 
 **Source Ancestry Label**:
