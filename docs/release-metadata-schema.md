@@ -198,14 +198,14 @@ effect-scale validation should declare at least:
 | Field | Required | Description |
 |---|---:|---|
 | `resource_id` | Yes | Stable ID for this Reference Resource, referenced from `effect_scale_validation.reference_resources` or `ancestry_assignment.reference_resources`. |
-| `kind` | Yes | `reference_af` for single-ancestry allele-frequency lookup resources used by effect-scale validation; `ancestry_mixture` for multi-ancestry mixture-frequency resources used by AF-based ancestry assignment (issue #23); other kinds (for example LD panels) may reuse the same declaration shape. |
+| `kind` | Yes | `reference_af` for single-ancestry allele-frequency lookup resources used by effect-scale validation; `ancestry_mixture` for multi-ancestry mixture-frequency resources used by AF-based ancestry assignment (issue #23); `qc_panel` for the fixed QC variant panel unconditionally retained regardless of significance (issue #28/#29); other kinds (for example LD panels) may reuse the same declaration shape. |
 | `ancestry` | Yes for `reference_af` | Ancestry/population label the resource represents, matching the controlled `assigned_ancestry` vocabulary. For `ancestry_mixture` resources, which cover multiple super-populations at once, use `ancestry: multi` and list the covered super-populations in `super_populations` instead. |
 | `super_populations` | Yes for `ancestry_mixture` | List of super-population labels the mixture reference can assign to (for example `AFR, AMR, EAS, EUR, MID, NAF, SAS`). |
 | `genome_build` | Yes | Genome build of the resource's coordinates. |
 | `variant_id_convention` | Yes | Variant identifier/allele convention used by the resource, for example `chr:pos_ref_alt`, or `chr:pos:A1:A2 (A1 = min(allele1, allele2))` for the canonical ALID convention `opengwasdb.ancestry` uses. |
 | `allele_columns` | Optional | Column-name mapping the resource uses for effect/other allele and frequency, for example `{effect: EA, other: OA, freq: EAF}`. |
-| `location` | Yes | External path or URI for the resource, outside this repository. |
-| `location_kind` | Optional | How to interpret `location`, for example `external_directory` or `external_file`. |
+| `location` | Yes | External path or URI for the resource, outside this repository — except `kind: qc_panel`, whose panel file is small enough (~10k rows) to track directly in this repository, so `location` is a repo-relative path instead. |
+| `location_kind` | Optional | How to interpret `location`, for example `external_directory`, `external_file`, or `tracked_file` for a small resource tracked directly in this repository. |
 | `fine_group_map` | Yes for `ancestry_mixture` | External path to the fine-ancestry-group -> super-population map (one row per fine group in the resource) used to aggregate a fitted mixture to super-population composition. |
 
 Reference-AF and ancestry-mixture resources are recorded here for provenance;
