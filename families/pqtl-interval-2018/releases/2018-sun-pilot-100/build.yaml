@@ -22,8 +22,8 @@ validation:
   required: yes
 artifacts:
   artifact_root: /data/opengwasdb
-  release_subdir: gwas-ssf-ragged/pqtl-interval-2018/2018-sun-pilot-100
-  filtered_dir: /data/opengwasdb/gwas-ssf-ragged/pqtl-interval-2018/2018-sun-pilot-100/filtered
-  work_dir: /data/opengwasdb/gwas-ssf-ragged/pqtl-interval-2018/2018-sun-pilot-100/work
-  store_uri: /data/opengwasdb/gwas-ssf-ragged/pqtl-interval-2018/2018-sun-pilot-100/store/ragged__pmid-29875488__European
+  release_subdir: pqtl-interval-2018/releases/2018-sun-pilot-100
+  filtered_dir: /data/opengwasdb/pqtl-interval-2018/releases/2018-sun-pilot-100/filtered
+  work_dir: /data/opengwasdb/pqtl-interval-2018/releases/2018-sun-pilot-100/work
+  store_uri: /data/opengwasdb/pqtl-interval-2018/releases/2018-sun-pilot-100/store/ragged__pmid-29875488__European
   build_log_uri: ~

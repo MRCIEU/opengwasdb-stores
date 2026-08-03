@@ -55,4 +55,4 @@ filter:
 output:
   release_dir: families/pqtl-interval-2018/releases/2018-sun-pilot-100
   artifact_root: /data/opengwasdb
-  artifact_subdir: gwas-ssf-ragged/pqtl-interval-2018/2018-sun-pilot-100
+  artifact_subdir: pqtl-interval-2018/releases/2018-sun-pilot-100

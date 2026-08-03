@@ -86,6 +86,21 @@ The repository stores metadata and small reports only. Store artifacts, source
 data, large logs, and large benchmark outputs belong outside this repository and
 should be referenced by URI when needed.
 
+## External Artifacts
+
+Large build products should mirror the Store Family and Release Bundle identity
+under the configured artifact root:
+
+```text
+<artifact-root>/<store-family-id>/releases/<family-release-id>/
+```
+
+For this server, the artifact root is `/data/opengwasdb`. A release artifact
+directory may contain `filtered/`, `work/`, and `store/` subdirectories. A local
+`<artifact-root>/<store-family-id>/latest` symlink may be useful for inspection,
+but tracked release bundles and build reports should record explicit release
+IDs and concrete artifact paths.
+
 ## Example
 
 The initial worked example is:

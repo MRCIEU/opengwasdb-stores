@@ -93,6 +93,10 @@ _Avoid_: store family, source format
 A versioned, immutable, validated OpenGWASDB analytical asset within a Store Family, produced from an accepted Release Manifest and material Build Recipe choices.
 _Avoid_: database, live store
 
+**Release Artifact**:
+A large material file or directory produced or consumed while building a Store Release, such as filtered source files, transient work files, build logs, or the built OpenGWASDB store. Release Artifacts live outside the Store Registry repository and are identified by explicit Store Family and Family Release ID paths.
+_Avoid_: release bundle, manifest
+
 **Release Lineage**:
 The relationship between Store Releases in a Store Family, including observed-only releases, reference-completed releases, corrected releases, and other derived releases.
 _Avoid_: family hierarchy, source lineage

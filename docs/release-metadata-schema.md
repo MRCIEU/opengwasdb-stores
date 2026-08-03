@@ -25,6 +25,13 @@ Release bundles live at:
 families/<store-family-id>/releases/<family-release-id>/
 ```
 
+Large release artifacts live outside this repository and should mirror the
+Store Family and Release Bundle identity under the configured artifact root:
+
+```text
+<artifact-root>/<store-family-id>/releases/<family-release-id>/
+```
+
 ## Pipeline stages
 
 | Stage | Purpose | Typical inputs | Outputs |
@@ -166,7 +173,7 @@ to the release.
 | `reference_resources` | Optional | List of reference resources used for completion, ancestry assignment, MAF lookup, or validation. |
 | `validation.required` | Yes | Whether validation is required before publishing the built store. |
 | `artifacts.artifact_root` | Optional | Configured root for large release artifacts outside this repository, such as `/data/opengwasdb`. |
-| `artifacts.release_subdir` | Optional | Release-specific artifact directory relative to `artifacts.artifact_root`. |
+| `artifacts.release_subdir` | Optional | Release-specific artifact directory relative to `artifacts.artifact_root`, conventionally `<store-family-id>/releases/<family-release-id>`. |
 | `artifacts.filtered_dir` | Optional | Directory containing filtered source files used by the builder. |
 | `artifacts.work_dir` | Optional | Directory for transient build/download files. |
 | `artifacts.store_uri` | Optional | URI for the built store artifact. |
