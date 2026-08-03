@@ -17,3 +17,11 @@ resources/data/mvp-example/
 
 # Ragged-store spike: transient downloads + filtered outputs (regenerate).
 resources/data/ragged-spike/
+
+# Generated ragged GWAS-SSF filtered files and built stores.
+resources/data/gwas-ssf-ragged/
+
+# Smoke-test sidecars from partial generator runs.
+families/*/releases/*/sidecars/*.partial.tsv
+
+__pycache__/
