@@ -14,10 +14,25 @@ the current `SomaScan.db` menu resource. Those rows should be handled by an
 explicit study-specific override or fallback sidecar, not by silently swapping to
 another SeqId with a similar target name.
 
+`sun-2018-analysis-targets.tsv` is that study-specific target sidecar. It keeps
+one or more rows per Sun et al. analysis and records how the target coordinate
+was resolved:
+
+- `somascan_db_seqid`: the GWAS Catalog SeqId matched `somascan-targets.tsv`
+  directly.
+- `somascan_db_gene_name`: the source SeqId was absent from current
+  `SomaScan.db`, but the GWAS Catalog target symbol matched a current
+  `SomaScan.db` gene.
+- `ensembl_hgnc_symbol`: the source SeqId was absent from current
+  `SomaScan.db`, and the coordinate was resolved by matching the GWAS Catalog
+  target symbol to Ensembl.
+- `unresolved`: the row is retained for review; it must not be silently dropped.
+
 Regenerate from the repository root with:
 
 ```sh
 Rscript families/pqtl-interval-2018/resources/scripts/generate-somascan-targets.R
+Rscript families/pqtl-interval-2018/resources/scripts/generate-sun-analysis-targets.R
 ```
 
 The generator caches the upstream SQLite database under `resources/cache/`,
