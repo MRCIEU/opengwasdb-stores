@@ -1,60 +1,31 @@
 #!/usr/bin/env python3
-"""Unit test for build-store.py's validation.yaml preservation logic.
+"""Unit test for the shared validation.yaml merge logic.
 
 build-store.py used to unconditionally overwrite `checks.ancestry`,
 `checks.effect_scale`, and `checks.sd_estimation` with hardcoded values every
 time it ran, silently discarding whatever the generator's `--mode=effect-scale`
-stage had just computed (issue #21). This proves the fix: those three checks
-and prior warnings must survive a build-store.py validation.yaml rewrite.
+stage had just computed (issue #21). The fix moved the merge logic into
+`resources/lib/release_yaml.py::merge_validation_yaml`, shared by
+build-store.py and the ancestry-assignment adapter (issue #25) so neither
+stage clobbers the other's checks, reports, or warnings. This proves the
+merge behaviour directly against that shared module.
 
 Run from the repository root:
     python3 tests/effect-scale-validation/test_build_store_validation_merge.py
 """
 from __future__ import annotations
 
-import importlib.util
 import sys
-import types
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-MODULE_PATH = REPO_ROOT / "resources" / "generators" / "gwas-ssf-ragged" / "build-store.py"
+sys.path.insert(0, str(REPO_ROOT))
 
-
-def _stub(name: str) -> types.ModuleType:
-    module = types.ModuleType(name)
-    sys.modules[name] = module
-    return module
-
-
-def load_build_store_module():
-    # build-store.py imports the opengwasdb package, which is a separate repo
-    # not guaranteed to be installed here. Stub it out so we can unit test the
-    # pure validation.yaml merge logic in isolation.
-    opengwasdb = _stub("opengwasdb")
-    _stub("opengwasdb.layouts")
-    _stub("opengwasdb.layouts.ragged")
-    build_ssf = _stub("opengwasdb.layouts.ragged.build_ssf")
-    build_ssf.build_ragged_from_ssf = lambda *a, **k: None
-    zarr_csr = _stub("opengwasdb.layouts.ragged.zarr_csr")
-    zarr_csr.RaggedCSRReader = object
-    model = _stub("opengwasdb.model")
-    manifest = _stub("opengwasdb.model.manifest")
-    manifest.StoreManifest = object
-    traits = _stub("opengwasdb.traits")
-    axis = _stub("opengwasdb.traits.axis")
-    axis.TraitsAxisReader = object
-    opengwasdb.layouts = sys.modules["opengwasdb.layouts"]
-
-    spec = importlib.util.spec_from_file_location("build_store_under_test", MODULE_PATH)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+from resources.lib.release_yaml import merge_validation_yaml  # noqa: E402
 
 
 def main() -> None:
-    module = load_build_store_module()
     n_checks = 0
 
     def check(cond: bool, message: str) -> None:
@@ -89,7 +60,17 @@ def main() -> None:
             encoding="utf-8",
         )
 
-        module.write_validation_yaml(path, path, "passed", ["build warning: nothing serious"])
+        # Simulate build-store.py running after the R effect-scale stage.
+        merge_validation_yaml(
+            path,
+            validator_name="resources/generators/gwas-ssf-ragged/build-store.py",
+            default_checks={"ancestry": "not_run", "effect_scale": "not_run", "sd_estimation": "not_run"},
+            updated_checks={
+                "schema": "passed", "files": "passed", "reader_smoke_test": "passed", "sparse_regions": "passed",
+            },
+            updated_reports={"build_report": "sidecars/build_report.tsv"},
+            new_warnings=["build warning: nothing serious"],
+        )
         rewritten = path.read_text(encoding="utf-8")
 
         check("effect_scale: failed" in rewritten,
@@ -101,8 +82,27 @@ def main() -> None:
         check("- build warning: nothing serious" in rewritten,
               "new build-time warnings must also be included")
         check("schema: passed" in rewritten, "build-store.py should still record its own passed checks")
+        check("build_report: sidecars/build_report.tsv" in rewritten,
+              "build-store.py's own report pointer must be written")
         check("status: failed" in rewritten,
               "overall status must reflect the worse of build checks and preserved effect-scale checks")
+
+        # Simulate a *second* run: an ancestry-assignment stage (issue #25)
+        # updating checks.ancestry afterwards must not discard build-store.py's
+        # reports.build_report or checks.schema/files/reader_smoke_test.
+        merge_validation_yaml(
+            path,
+            validator_name="resources/generators/gwas-ssf-ragged/ancestry-assign.py",
+            updated_checks={"ancestry": "passed"},
+            updated_reports={},
+            new_warnings=[],
+        )
+        rewritten_again = path.read_text(encoding="utf-8")
+        check("ancestry: passed" in rewritten_again, "the ancestry stage's own check must be applied")
+        check("schema: passed" in rewritten_again,
+              "build-store.py's checks must survive a later ancestry-stage rewrite")
+        check("build_report: sidecars/build_report.tsv" in rewritten_again,
+              "build-store.py's report pointer must survive a later ancestry-stage rewrite")
 
     print(f"ALL {n_checks} CHECKS PASSED")
 

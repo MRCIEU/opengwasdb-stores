@@ -1,0 +1,20 @@
+status: passed_with_warnings
+validated_at: 2026-08-03T22:42:50.691845+00:00
+validator:
+  name: resources/generators/gwas-ssf-ragged/ancestry-assign.py
+  version: null
+checks:
+  schema: not_run
+  files: not_run
+  reader_smoke_test: not_run
+  ancestry: passed_with_warnings
+  effect_scale: not_run
+  sd_estimation: not_run
+  sparse_regions: not_run
+reports: {}
+warnings:
+  - FIXT_MIXED: ancestry gate failed (margin)
+  - FIXT_LOW_OVERLAP: ancestry gate failed (overlap)
+  - FIXT_MIXED: source_ancestry_label='European' disagrees with AF-based dominant_superpop='SAS'
+  - FIXT_MISMATCH: source_ancestry_label='European' disagrees with AF-based dominant_superpop='AFR'
+errors: []

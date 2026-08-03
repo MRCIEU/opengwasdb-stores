@@ -1,0 +1,34 @@
+metadata_schema_version: 1.0
+store_family_id: fixture-no-cis
+family_release_id: fixture-release
+store_key: ragged__pmid-99999999__European
+status: candidate
+source_collection_id: fixture
+source_snapshot_id: fixture
+release_kind: one-off
+association_coverage: signals_only
+description: Fixture release proving the no-cis sparse-region policy (issue
+created_at: '2026-08-03T22:42:51Z'
+accepted_at: ~
+generator:
+  name: resources/generators/gwas-ssf-ragged/generate.R
+  version: sha256:622763bd48f327ea52d1021e9c82d2dbf41663b9682fa0dbe8e524f9a58b99f7
+  command: Rscript resources/generators/gwas-ssf-ragged/generate.R --config=/tmp/Rtmpn84jjO/file1fa1e96ae5348b.yaml
+    --mode=emit
+source_defaults:
+  source_genome_build: GRCh38
+  license: test-fixture
+  original_effect_scale: sd
+  stored_effect_scale: sd
+  sample_size_kind: total
+  source_ancestry_label: European
+  assigned_ancestry: European
+lineage:
+  derived_from: ~
+sidecars:
+  sparse_regions: sidecars/sparse_regions.tsv
+  filter_summary: sidecars/filter_summary.tsv
+  build_report: sidecars/build_report.tsv
+  sd_estimation: sidecars/sd_estimation.tsv
+  ancestry: sidecars/ancestry.tsv
+notes: No gene target for this family; only significant/suggestive regions are retained.

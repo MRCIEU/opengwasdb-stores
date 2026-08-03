@@ -218,4 +218,27 @@ analyses_dt[, analysis_index := .I - 1L]
 dir.create(release_dir, recursive = TRUE, showWarnings = FALSE)
 fwrite(analyses_dt, file.path(release_dir, "analyses.tsv"), sep = "\t", na = "")
 
+# The effect-scale stage mutates validation.yaml (checks/warnings) and
+# analyses.tsv (original_sd/original_sd_method) in place. Reset validation.yaml
+# to a pristine not_run baseline on every regeneration so repeated test runs
+# are idempotent rather than accumulating warnings across invocations.
+writeLines(c(
+  "status: not_run",
+  "validated_at: ~",
+  "validator:",
+  "  name: ~",
+  "  version: ~",
+  "checks:",
+  "  schema: not_run",
+  "  files: not_run",
+  "  reader_smoke_test: not_run",
+  "  ancestry: not_run",
+  "  effect_scale: not_run",
+  "  sd_estimation: not_run",
+  "  sparse_regions: not_run",
+  "reports: {}",
+  "warnings: []",
+  "errors: []"
+), file.path(release_dir, "validation.yaml"))
+
 cat(sprintf("Wrote %d fixture analyses to %s\n", nrow(analyses_dt), release_dir))

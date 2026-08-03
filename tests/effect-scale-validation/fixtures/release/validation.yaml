@@ -1,5 +1,5 @@
 status: failed
-validated_at: '2026-08-03T17:12:57Z'
+validated_at: '2026-08-03T22:42:50Z'
 validator:
   name: resources/generators/gwas-ssf-ragged/generate.R
   version: ~

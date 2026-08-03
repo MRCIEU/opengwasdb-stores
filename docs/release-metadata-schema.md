@@ -75,7 +75,7 @@ release bundle; candidate bundles may leave lifecycle timestamps null.
 | `source_collection_id` | Yes | Source Collection used by this Store Family. |
 | `source_snapshot_id` | Yes | Dated or provider-native source snapshot used for this release, for example a GWAS Catalog studies-table release date. |
 | `release_kind` | Yes | Release cadence kind, such as `source-natural`, `date-snapshot`, `one-off`, or `corrected`. |
-| `association_coverage` | Yes | Expected association coverage: `full_gwas`, `cis`, `trans`, `cis_plus_signals`, `top_hits`, or `unknown`. |
+| `association_coverage` | Yes | Expected association coverage: `full_gwas`, `cis`, `trans`, `cis_plus_signals`, `signals_only`, `top_hits`, or `unknown`. `signals_only` is `cis_plus_signals` minus the cis window, for Store Families whose Analyses have no single encoding gene to derive a cis window from (for example small-molecule metabolomics, issue #26) — only significant-hit and suggestive-lead regions are retained. |
 | `description` | Yes | Short human-readable release description. |
 | `created_at` | Optional | Timestamp when the candidate bundle was generated. |
 | `accepted_at` | Optional | Timestamp when the bundle was accepted as the release input record. |
@@ -105,6 +105,15 @@ semantics. The table should be streamable, diffable, and directly consumable by
 builders.
 
 Use empty strings for unknown optional values in TSV.
+
+Some generators add family-specific columns beyond this shared/registry
+table, such as the `gwas-ssf-ragged` generator's single-gene-target columns
+(`trait_id`, `gene_id`, `gene_name`, `trait_chr`, `trait_bp`, `n`, `mhc`,
+`target_resolution_method`, `n_target_rows`) for proteomics Store Families
+whose Analyses each have one resolvable encoding gene. A Store Family with no
+such target (for example small-molecule metabolomics, issue #26) omits these
+columns entirely rather than filling them with placeholder or `NA` values —
+their absence is how a reviewer tells the two family shapes apart.
 
 Accepted build rows must have usable sample-size metadata. Analyses with unknown
 sample size may appear in Source Inventories, candidate diagnostics, or review
@@ -188,18 +197,20 @@ effect-scale validation should declare at least:
 
 | Field | Required | Description |
 |---|---:|---|
-| `resource_id` | Yes | Stable ID for this Reference Resource, referenced from `effect_scale_validation.reference_resources`. |
-| `kind` | Yes | `reference_af` for allele-frequency lookup resources; other kinds (for example LD panels) may reuse the same declaration shape. |
-| `ancestry` | Yes | Ancestry/population label the resource represents, matching the controlled `assigned_ancestry` vocabulary. |
+| `resource_id` | Yes | Stable ID for this Reference Resource, referenced from `effect_scale_validation.reference_resources` or `ancestry_assignment.reference_resources`. |
+| `kind` | Yes | `reference_af` for single-ancestry allele-frequency lookup resources used by effect-scale validation; `ancestry_mixture` for multi-ancestry mixture-frequency resources used by AF-based ancestry assignment (issue #23); other kinds (for example LD panels) may reuse the same declaration shape. |
+| `ancestry` | Yes for `reference_af` | Ancestry/population label the resource represents, matching the controlled `assigned_ancestry` vocabulary. For `ancestry_mixture` resources, which cover multiple super-populations at once, use `ancestry: multi` and list the covered super-populations in `super_populations` instead. |
+| `super_populations` | Yes for `ancestry_mixture` | List of super-population labels the mixture reference can assign to (for example `AFR, AMR, EAS, EUR, MID, NAF, SAS`). |
 | `genome_build` | Yes | Genome build of the resource's coordinates. |
-| `variant_id_convention` | Yes | Variant identifier/allele convention used by the resource, for example `chr:pos_ref_alt`. |
+| `variant_id_convention` | Yes | Variant identifier/allele convention used by the resource, for example `chr:pos_ref_alt`, or `chr:pos:A1:A2 (A1 = min(allele1, allele2))` for the canonical ALID convention `opengwasdb.ancestry` uses. |
 | `allele_columns` | Optional | Column-name mapping the resource uses for effect/other allele and frequency, for example `{effect: EA, other: OA, freq: EAF}`. |
 | `location` | Yes | External path or URI for the resource, outside this repository. |
-| `location_kind` | Optional | How to interpret `location`, for example `external_directory`. |
+| `location_kind` | Optional | How to interpret `location`, for example `external_directory` or `external_file`. |
+| `fine_group_map` | Yes for `ancestry_mixture` | External path to the fine-ancestry-group -> super-population map (one row per fine group in the resource) used to aggregate a fitted mixture to super-population composition. |
 
-Reference-AF resources are recorded here for provenance; the resource data
-itself lives under the configured artifact root or another external location,
-never inside this repository.
+Reference-AF and ancestry-mixture resources are recorded here for provenance;
+the resource data itself lives under the configured artifact root or another
+external location, never inside this repository.
 
 ### Effect-scale validation configuration
 
@@ -220,6 +231,40 @@ Family generator configuration may set defaults for these thresholds and
 override them per release, per the Store Family's molecular or
 population-scale GWAS tolerances.
 
+### Ancestry assignment configuration
+
+`build.yaml` `ancestry_assignment` configures the AF-based ancestry
+assignment stage (issue #23) for one release. Unlike `effect_scale_validation`
+(which maps one Reference Resource per assigned ancestry, since each
+reference-AF panel is single-ancestry), a single ancestry-mixture Reference
+Resource covers every super-population at once, so this block references
+exactly one Reference Resource rather than an ancestry-keyed list:
+
+| Field | Required | Description |
+|---|---:|---|
+| `enabled` | Yes | Whether this release opts into AF-based ancestry assignment. |
+| `reference_resource_id` | Yes when enabled | `resource_id` of the declared `kind: ancestry_mixture` Reference Resource to fit against. |
+| `maf_floor` | Optional | Minimum reference-wide MAF for a variant to be used in the mixture fit; defaults to `0.01`. Lower for tiny fixture panels where all variants are informative. |
+| `gates.tau` | Yes when enabled | Minimum dominant super-population proportion required to admit an assignment. |
+| `gates.delta` | Yes when enabled | Minimum margin of the dominant super-population's proportion over the runner-up. |
+| `gates.n_min` | Yes when enabled | Minimum number of allele-frequency sites overlapping the reference required before fitting. Ragged/sparse releases (signal-derived regions only, not a full-genome scan) typically need a much lower `n_min` than a dense, full-GWAS release. |
+| `gates.residual_max` | Yes when enabled | Maximum NNLS mixture-fit residual before the assignment is gated out as unreliable. |
+
+Only Analyses with usable source allele frequencies attempt AF-based
+assignment; Analyses without usable source AF keep
+`ancestry_assignment_method: source_trusted_no_af` untouched, per issue #11's
+settled trust-vs-validate policy. When an assignment is attempted but fails a
+gate, `ancestry_assignment_method` becomes `unassigned` (not left at its
+prior value), because the prior value would otherwise misleadingly imply
+validation was never attempted.
+
+`assigned_ancestry` for an `af_assigned` Analysis is one of the ancestry-mixture
+reference's super-population codes (for example `AFR`, `AMR`, `EAS`, `EUR`,
+`MID`, `NAF`, `SAS`), not this registry's free-text source ancestry labels
+(`European`, `East Asian`, and so on) — the two vocabularies are related but
+distinct, and a reviewer comparing them should expect a translation, recorded
+per-Analysis in the ancestry sidecar's `source_assigned_mismatch`.
+
 ## `validation.yaml`
 
 Release-level acceptance and build validation summary.
@@ -233,7 +278,7 @@ Release-level acceptance and build validation summary.
 | `checks.schema` | Yes | Whether required files and fields conform to OpenGWASDB's shared core schema and this registry's release-bundle requirements. |
 | `checks.files` | Yes | Whether referenced source or filtered files exist and match checksums. |
 | `checks.reader_smoke_test` | Optional | Whether OpenGWASDB can read a small sample from each source file or bundle. |
-| `checks.ancestry` | Optional | Whether ancestry fields are valid and sidecar evidence is internally consistent. |
+| `checks.ancestry` | Optional | `not_run` when the release has not opted into `ancestry_assignment` (or opted in but every Analysis was skipped for lacking usable source AF). Otherwise reflects the AF-based ancestry sidecar evidence: `passed` when every attempted Analysis cleared its gates with no source/assigned mismatch, `passed_with_warnings` when at least one attempted Analysis failed a gate or disagreed with its source-declared ancestry, and never a bare `passed` implying validation ran when it did not. |
 | `checks.effect_scale` | Optional | `not_run` when the release has not opted into `effect_scale_validation`, or when it has opted in but reflects only controlled-vocabulary validity. Once a release opts in, this must reflect the empirical reference-AF/source-AF SD-estimation sidecar outcome across attempted Analyses (`passed`, `passed_with_warnings`, or `failed`), not merely that declared vocabulary values are valid. Vocabulary-only checks must not report `passed` as if empirical validation had run. |
 | `checks.sd_estimation` | Optional | `not_run` when SD-estimation was not attempted. Otherwise `passed` only when the sidecar is internally consistent (every attempted, warned, or failed Analysis has a matching sidecar row with required fields populated) and no attempted Analysis has status `failed`; `passed_with_warnings` when at least one Analysis has status `warning`, `skipped` for a reason that should be reviewed (for example `no_reference_resource_for_ancestry`), or `failed` otherwise. |
 | `checks.sparse_regions` | Optional | Whether ragged region sidecars match filtered files. |

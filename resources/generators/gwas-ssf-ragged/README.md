@@ -57,15 +57,55 @@ separately maintains. A release only needs this step when its config declares
 See `docs/release-metadata-schema.md` for the config and sidecar field
 reference, and `tests/effect-scale-validation/` for fixture coverage.
 
+Run AF-based ancestry assignment after `filter` (issues #23, #25), for
+releases whose Source Collection provides usable source allele frequencies:
+
+```sh
+OPENGWASDB_REPO=/path/to/opengwasdb
+PYTHONPATH="${OPENGWASDB_REPO}" \
+  "${OPENGWASDB_REPO}/.venv/bin/python" \
+  resources/generators/gwas-ssf-ragged/ancestry-assign.py \
+  --release-dir=families/<family>/releases/<release>
+```
+
+For each Analysis with usable source AF, this builds a canonical `{alid: af}`
+map from its retained filtered source rows and calls
+`opengwasdb.ancestry.assign_ancestry` against the release's configured
+`ancestry_assignment.reference_resource_id` (an ancestry-mixture Reference
+Resource, distinct from the single-ancestry `reference_af` resources
+effect-scale validation uses), writing `sidecars/ancestry.tsv`. Analyses
+without usable source AF are left untouched at `source_trusted_no_af`, per
+issue #11's settled trust-vs-validate policy — this stage never assigns
+ancestry when there is nothing to validate against. It merges empirical
+`checks.ancestry` into `validation.yaml` via the same shared
+`resources/lib/release_yaml.py::merge_validation_yaml` helper the effect-scale
+stage's fix to `build-store.py` introduced, so it never clobbers another
+stage's checks. See `docs/release-metadata-schema.md` ("Ancestry assignment
+configuration") and `tests/ancestry-assignment/` for fixture coverage.
+
 The sparse policy implemented here is:
 
 - cis windows: every target gene span plus/minus `cis_flank_bp`, retained in
-  full.
+  full. Only applies to Store Families that declare `inputs.analysis_targets`
+  (a resolvable single encoding gene per Analysis, e.g. SomaScan proteomics).
 - significant trans: non-cis variants with `p_value <= significant_p`, expanded
   plus/minus `trans_flank_bp`, merged per chromosome, retained in full.
 - suggestive trans: non-cis and non-significant-trans variants with
   `significant_p < p_value <= suggestive_p`, kept as distance-pruned lead
   variants only.
+
+A Store Family with no single encoding gene per Analysis (issue #26; for
+example small-molecule metabolomics, which has no one gene to draw a cis
+window around) simply omits `inputs.analysis_targets` from its config. The
+generator then retains only the significant/suggestive regions above with
+zero cis rows, does not require `fail_if_target_unresolved`-style target
+resolution at all, and never emits the single-gene-target columns
+(`trait_id`, `gene_id`, `gene_name`, `trait_chr`, `trait_bp`, `n`, `mhc`,
+`target_resolution_method`, `n_target_rows`) — see
+`docs/release-metadata-schema.md`'s `analyses.tsv` section and
+`tests/no-cis-region-policy/` for fixture coverage. The existing
+target-resolving families (pqtl-interval-2018) are unaffected; this is an
+additive configuration, not a behavioural change to the cis+signals policy.
 
 Large filtered files, transient downloads, and stores are written under the
 configured `output.artifact_root` plus `output.artifact_subdir`. The release

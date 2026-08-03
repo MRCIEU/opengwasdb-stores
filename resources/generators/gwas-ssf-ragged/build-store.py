@@ -7,10 +7,18 @@ import argparse
 import csv
 import gzip
 import json
-import subprocess
+import sys
 import time
-from datetime import UTC, datetime
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+from resources.lib.release_yaml import (  # noqa: E402
+    merge_validation_yaml,
+    read_release_yaml,
+    repo_root,
+    require_text,
+    resolve_path,
+)
 
 from opengwasdb.layouts.ragged.build_ssf import build_ragged_from_ssf
 from opengwasdb.layouts.ragged.zarr_csr import RaggedCSRReader
@@ -24,60 +32,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--store-dir")
     parser.add_argument("--overwrite", action="store_true")
     return parser.parse_args()
-
-
-def read_release_yaml(path: Path) -> dict[str, object]:
-    out: dict[str, object] = {}
-    current: str | None = None
-    for line in path.read_text(encoding="utf-8").splitlines():
-        if not line.strip() or line.lstrip().startswith("#"):
-            continue
-        if not line.startswith(" ") and ":" in line:
-            key, value = line.split(":", 1)
-            current = key.strip()
-            parsed = parse_yaml_scalar(value)
-            out[current] = {} if parsed == "" else parsed
-        elif current and line.startswith("  ") and ":" in line:
-            key, value = line.split(":", 1)
-            if not isinstance(out.get(current), dict):
-                out[current] = {}
-            out[current][key.strip()] = parse_yaml_scalar(value)
-    return out
-
-
-def parse_yaml_scalar(value: str) -> str:
-    value = value.strip().strip("'\"")
-    if value in {"~", "|", ">"}:
-        return ""
-    return value
-
-
-def require_text(data: dict[str, object], *keys: str) -> str:
-    current: object = data
-    for key in keys:
-        if not isinstance(current, dict) or key not in current:
-            dotted = ".".join(keys)
-            raise SystemExit(f"Missing required YAML field: {dotted}")
-        current = current[key]
-    if current is None:
-        return ""
-    return str(current)
-
-
-def repo_root(start: Path) -> Path:
-    result = subprocess.run(
-        ["git", "rev-parse", "--show-toplevel"],
-        cwd=start,
-        text=True,
-        stdout=subprocess.PIPE,
-        check=True,
-    )
-    return Path(result.stdout.strip())
-
-
-def resolve_path(root: Path, value: str) -> Path:
-    path = Path(value)
-    return path if path.is_absolute() else root / path
 
 
 def variant_lookup(store: Path) -> dict[int, tuple[str, int]]:
@@ -359,8 +313,17 @@ def main() -> None:
         writer = csv.DictWriter(fh, delimiter="\t", fieldnames=list(report), lineterminator="\n")
         writer.writeheader()
         writer.writerow(report)
-    status = "passed_with_warnings" if warnings else "passed"
-    write_validation_yaml(release_dir / "validation.yaml", report_path, status, warnings)
+    build_status = "passed_with_warnings" if warnings else "passed"
+    merge_validation_yaml(
+        release_dir / "validation.yaml",
+        validator_name="resources/generators/gwas-ssf-ragged/build-store.py",
+        default_checks={"ancestry": "not_run", "effect_scale": "not_run", "sd_estimation": "not_run"},
+        updated_checks={
+            "schema": "passed", "files": "passed", "reader_smoke_test": "passed", "sparse_regions": build_status,
+        },
+        updated_reports={"build_report": str(report_path.relative_to(release_dir))},
+        new_warnings=warnings,
+    )
     print(json.dumps(report, indent=2, sort_keys=True))
 
 

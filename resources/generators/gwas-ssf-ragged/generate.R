@@ -176,9 +176,38 @@ write_yaml_file <- function(x, path) {
   writeLines(sub("\n+$", "", as.yaml(x)), path)
 }
 
+# A Store Family declares `inputs.analysis_targets` only when its Analyses
+# have a single encoding gene to derive a cis window from (SomaScan-style
+# proteomics). Families with no such target (e.g. small-molecule metabolomics,
+# issue #26) omit it entirely, and the generator retains only signal-derived
+# (significant/suggestive trans) regions rather than fabricating a cis target.
+has_gene_targets <- function(cfg) !is.null(cfg$inputs$analysis_targets)
+
+empty_target_summary <- function() {
+  data.table(
+    source_analysis_id = character(), trait_id = character(), gene_id = character(),
+    gene_name = character(), target_id = character(), target_label = character(),
+    trait_chr = character(), trait_bp = integer(), mhc = logical(),
+    target_resolution_method = character(), n_target_rows = integer()
+  )
+}
+
+empty_targets_sidecar <- function() {
+  data.table(
+    source_analysis_id = character(), chromosome = character(),
+    gene_start = integer(), gene_end = integer(), ensembl_gene_id = character(),
+    gene_name = character(), mapping_status = character(),
+    trait_ontology_id = character(), mhc = logical(), target_resolution_method = character()
+  )
+}
+
 load_inputs <- function(cfg, root) {
   candidates <- fread(path_abs(root, cfg$inputs$candidates), sep = "\t", na.strings = "")
-  targets <- fread(path_abs(root, cfg$inputs$analysis_targets), sep = "\t", na.strings = "")
+  targets <- if (has_gene_targets(cfg)) {
+    fread(path_abs(root, cfg$inputs$analysis_targets), sep = "\t", na.strings = "")
+  } else {
+    empty_targets_sidecar()
+  }
   list(candidates = candidates, targets = targets)
 }
 
@@ -187,11 +216,24 @@ select_analyses <- function(cfg, candidates) {
   if (!is.null(cfg$selection$store_key)) {
     selected <- selected[store_key == cfg$selection$store_key]
   }
-  if (!is.null(cfg$selection$ancestry_group)) {
-    selected <- selected[ancestry_group == cfg$selection$ancestry_group]
-  }
-  if (!is.null(cfg$selection$n_analyses)) {
-    selected <- selected[seq_len(min(as.integer(cfg$selection$n_analyses), .N))]
+  if (!is.null(cfg$selection$ancestry_groups)) {
+    # Multi-ancestry slice (issue #27): a fixed number of analyses per
+    # configured ancestry group, e.g. a small cross-ancestry pilot proving AF-
+    # based ancestry assignment discriminates rather than always agreeing
+    # with the source label. Additive: single-`ancestry_group` families
+    # (pqtl-interval-2018) are unaffected and keep using the branch below.
+    groups <- unlist(cfg$selection$ancestry_groups)
+    per_group <- as.integer(cfg$selection$n_analyses_per_ancestry %||% cfg$selection$n_analyses)
+    selected <- selected[ancestry_group %in% groups]
+    setorder(selected, ancestry_group)
+    selected <- selected[, .SD[seq_len(min(per_group, .N))], by = ancestry_group]
+  } else {
+    if (!is.null(cfg$selection$ancestry_group)) {
+      selected <- selected[ancestry_group == cfg$selection$ancestry_group]
+    }
+    if (!is.null(cfg$selection$n_analyses)) {
+      selected <- selected[seq_len(min(as.integer(cfg$selection$n_analyses), .N))]
+    }
   }
   if (!nrow(selected)) stop("Selection produced zero analyses")
   selected[, analysis_index := .I - 1L]
@@ -229,7 +271,7 @@ summarise_targets <- function(targets, selected_ids, fail_unresolved = TRUE) {
   ), by = source_analysis_id]
 }
 
-manifest_rows <- function(cfg, selected, target_summary, paths) {
+manifest_rows <- function(cfg, selected, target_summary, paths, has_targets = TRUE) {
   x <- merge(
     selected,
     target_summary,
@@ -240,7 +282,8 @@ manifest_rows <- function(cfg, selected, target_summary, paths) {
   )
   setorder(x, analysis_index)
 
-  x[, gene_name_slug := slugify(gene_name)]
+  slug_source <- if (has_targets) x$gene_name else x$STUDY.ACCESSION
+  x[, gene_name_slug := slugify(slug_source)]
   x[, filtered_file := sprintf("%s_%s.filtered.tsv.gz", gene_name_slug, STUDY.ACCESSION)]
   x[, source_file := file.path(paths$filtered_dir, filtered_file)]
   x[, source_url := ssf_url(STUDY.ACCESSION, cfg$source$ftp_base)]
@@ -265,9 +308,18 @@ manifest_rows <- function(cfg, selected, target_summary, paths) {
   x[, checksum := ""]
   x[, checksum_algorithm := "sha256"]
   x[, size_bytes := ""]
-  x[, n := sample_size]
   x[, tissue := cfg$defaults$tissue %||% ""]
   x[, context := cfg$defaults$context %||% ""]
+  if (has_targets) x[, n := sample_size]
+
+  # Single-gene-target columns (trait_id, gene_id/name, cis coordinates, MHC
+  # flag, resolution provenance) only exist for families with a resolvable
+  # per-Analysis gene target (issue #26). A no-cis family (e.g. metabolomics)
+  # never emits these rather than filling them with placeholder/NA values;
+  # everything else keeps the same column order regardless.
+  target_cols_after_trait_ontology <- if (has_targets) "trait_id" else character()
+  target_cols_after_exclude <- if (has_targets) c("gene_id", "gene_name", "trait_chr", "trait_bp", "n") else character()
+  target_cols_after_context <- if (has_targets) c("mhc", "target_resolution_method", "n_target_rows") else character()
 
   out_cols <- c(
     "analysis_index",
@@ -276,7 +328,7 @@ manifest_rows <- function(cfg, selected, target_summary, paths) {
     "source_label" = "DISEASE.TRAIT",
     "trait_ontology_name" = "MAPPED_TRAIT",
     "trait_ontology_id" = "MAPPED_TRAIT_URI",
-    "trait_id",
+    target_cols_after_trait_ontology,
     "source_file",
     "source_url",
     "source_bundle_id",
@@ -304,16 +356,10 @@ manifest_rows <- function(cfg, selected, target_summary, paths) {
     "analysis_group_id",
     "inclusion_reason",
     "exclude_from_build",
-    "gene_id",
-    "gene_name",
-    "trait_chr",
-    "trait_bp",
-    "n",
+    target_cols_after_exclude,
     "tissue",
     "context",
-    "mhc",
-    "target_resolution_method",
-    "n_target_rows"
+    target_cols_after_context
   )
   out_names <- ifelse(nzchar(names(out_cols)), names(out_cols), out_cols)
   ans <- data.table()
@@ -334,9 +380,26 @@ build_reference_resources_yaml <- function(cfg) {
       variant_id_convention = res$variant_id_convention,
       allele_columns = res$allele_columns,
       location = res$root,
-      location_kind = res$location_kind %||% "external_directory"
+      location_kind = res$location_kind %||% "external_directory",
+      fine_group_map = res$fine_group_map
     )
   })
+}
+
+build_ancestry_assignment_yaml <- function(cfg) {
+  aa <- cfg$ancestry_assignment
+  if (is.null(aa)) return(NULL)
+  list(
+    enabled = aa$enabled %||% TRUE,
+    reference_resource_id = aa$reference_resource_id,
+    maf_floor = aa$maf_floor %||% 0.01,
+    gates = list(
+      tau = aa$gates$tau %||% 0.50,
+      delta = aa$gates$delta %||% 0.20,
+      n_min = aa$gates$n_min %||% 5000L,
+      residual_max = aa$gates$residual_max %||% 0.06
+    )
+  )
 }
 
 build_effect_scale_validation_yaml <- function(cfg) {
@@ -382,6 +445,7 @@ write_build_yaml <- function(cfg, root, release_dir, paths) {
     ),
     reference_resources = build_reference_resources_yaml(cfg),
     effect_scale_validation = build_effect_scale_validation_yaml(cfg),
+    ancestry_assignment = build_ancestry_assignment_yaml(cfg),
     validation = list(required = TRUE),
     artifacts = list(
       artifact_root = paths$artifact_root,
@@ -397,21 +461,36 @@ write_build_yaml <- function(cfg, root, release_dir, paths) {
 emit_bundle <- function(cfg, root) {
   inputs <- load_inputs(cfg, root)
   selected <- select_analyses(cfg, inputs$candidates)
-  target_summary <- summarise_targets(
-    inputs$targets,
-    selected$STUDY.ACCESSION,
-    cfg$selection$fail_if_target_unresolved %||% TRUE
-  )
+  has_targets <- has_gene_targets(cfg)
+  target_summary <- if (has_targets) {
+    summarise_targets(
+      inputs$targets,
+      selected$STUDY.ACCESSION,
+      cfg$selection$fail_if_target_unresolved %||% TRUE
+    )
+  } else {
+    empty_target_summary()
+  }
   paths <- artifact_paths(cfg, root)
-  analyses <- manifest_rows(cfg, selected, target_summary, paths)
+  analyses <- manifest_rows(cfg, selected, target_summary, paths, has_targets = has_targets)
 
   release_dir <- path_abs(root, cfg$output$release_dir)
   sidecar_dir <- file.path(release_dir, "sidecars")
   dir.create(sidecar_dir, recursive = TRUE, showWarnings = FALSE)
   fwrite(analyses, file.path(release_dir, "analyses.tsv"), sep = "\t", na = "")
 
-  target_subset <- inputs$targets[source_analysis_id %in% selected$STUDY.ACCESSION]
-  fwrite(target_subset, file.path(sidecar_dir, "analysis_targets.tsv"), sep = "\t", na = "")
+  sidecars_list <- list(
+    sparse_regions = "sidecars/sparse_regions.tsv",
+    filter_summary = "sidecars/filter_summary.tsv",
+    build_report = "sidecars/build_report.tsv",
+    sd_estimation = "sidecars/sd_estimation.tsv",
+    ancestry = "sidecars/ancestry.tsv"
+  )
+  if (has_targets) {
+    target_subset <- inputs$targets[source_analysis_id %in% selected$STUDY.ACCESSION]
+    fwrite(target_subset, file.path(sidecar_dir, "analysis_targets.tsv"), sep = "\t", na = "")
+    sidecars_list <- c(list(analysis_targets = "sidecars/analysis_targets.tsv"), sidecars_list)
+  }
   fwrite(empty_sparse_regions(), file.path(sidecar_dir, "sparse_regions.tsv"), sep = "\t")
 
   command <- paste("Rscript resources/generators/gwas-ssf-ragged/generate.R",
@@ -444,13 +523,7 @@ emit_bundle <- function(cfg, root) {
       assigned_ancestry = cfg$selection$ancestry_group
     ),
     lineage = list(derived_from = NULL),
-    sidecars = list(
-      analysis_targets = "sidecars/analysis_targets.tsv",
-      sparse_regions = "sidecars/sparse_regions.tsv",
-      filter_summary = "sidecars/filter_summary.tsv",
-      build_report = "sidecars/build_report.tsv",
-      sd_estimation = "sidecars/sd_estimation.tsv"
-    ),
+    sidecars = sidecars_list,
     notes = cfg$notes %||% ""
   ), file.path(release_dir, "release.yaml"))
 
@@ -713,7 +786,12 @@ filter_release <- function(cfg, root, max_analyses = NA_integer_, only_analysis_
     if (!col %in% names(analyses)) analyses[, (col) := ""]
     analyses[, (col) := fifelse(is.na(as.character(get(col))), "", as.character(get(col)))]
   }
-  targets <- fread(file.path(release_dir, "sidecars", "analysis_targets.tsv"), sep = "\t", na.strings = "")
+  targets_sidecar_path <- file.path(release_dir, "sidecars", "analysis_targets.tsv")
+  targets <- if (file.exists(targets_sidecar_path)) {
+    fread(targets_sidecar_path, sep = "\t", na.strings = "")
+  } else {
+    empty_targets_sidecar()
+  }
 
   todo <- analyses
   if (nzchar(only_analysis_id)) {
@@ -730,7 +808,10 @@ filter_release <- function(cfg, root, max_analyses = NA_integer_, only_analysis_
   ranges <- list()
   for (i in seq_len(nrow(todo))) {
     row <- todo[i]
-    cat(sprintf("[%d/%d] %s %s\n", i, nrow(todo), row$analysis_id, row$gene_name))
+    # `gene_name` only exists for target-resolving families (issue #26); for
+    # a no-target family this label falls back to the analysis ID alone.
+    progress_label <- if ("gene_name" %in% names(row)) row$gene_name else row$analysis_id
+    cat(sprintf("[%d/%d] %s %s\n", i, nrow(todo), row$analysis_id, progress_label))
     result <- tryCatch(
       process_one(row, targets, cfg, root, filtered_dir, work_dir),
       error = function(e) {
@@ -807,13 +888,19 @@ filter_release <- function(cfg, root, max_analyses = NA_integer_, only_analysis_
 validate_emit <- function(cfg, root) {
   release_dir <- path_abs(root, cfg$output$release_dir)
   analyses <- fread(file.path(release_dir, "analyses.tsv"), sep = "\t", na.strings = "")
+  has_targets <- has_gene_targets(cfg)
   required <- c(
     "analysis_index", "analysis_id", "source_analysis_id", "source_label",
     "trait_ontology_name", "trait_ontology_id", "source_file",
     "source_genome_build", "license", "stored_effect_scale", "sample_size_kind",
-    "sample_size_scope", "sample_size", "filtered_file", "trait_id", "gene_id",
-    "gene_name", "trait_chr", "trait_bp", "n", "mhc"
+    "sample_size_scope", "sample_size", "filtered_file"
   )
+  # trait_id/gene_id/gene_name/trait_chr/trait_bp/n/mhc are single-gene-target
+  # columns (issue #26): required only for Store Families with a resolvable
+  # per-Analysis gene target, absent entirely (not NA-filled) otherwise.
+  if (has_targets) {
+    required <- c(required, "trait_id", "gene_id", "gene_name", "trait_chr", "trait_bp", "n", "mhc")
+  }
   missing_cols <- setdiff(required, names(analyses))
   if (length(missing_cols)) stop("analyses.tsv missing columns: ", paste(missing_cols, collapse = ", "))
   if (anyDuplicated(analyses$analysis_id)) stop("analysis_id must be unique")
@@ -821,7 +908,7 @@ validate_emit <- function(cfg, root) {
     stop("analysis_index must be dense 0..n-1")
   }
   if (any(is.na(analyses$sample_size))) stop("sample_size is required for every analysis")
-  if (any(is.na(analyses$trait_chr) | is.na(analyses$trait_bp))) {
+  if (has_targets && any(is.na(analyses$trait_chr) | is.na(analyses$trait_bp))) {
     stop("trait_chr and trait_bp are required for every selected analysis")
   }
   if (any(!analyses$stored_effect_scale %in% c("sd", "log_or", "log_hazard"))) {
