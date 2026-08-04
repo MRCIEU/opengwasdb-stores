@@ -1,0 +1,16 @@
+status: passed
+validated_at: 2026-08-04T09:18:50.132393+00:00
+validator:
+  name: resources/generators/gwas-ssf-ragged/ancestry-assign.py
+  version: null
+checks:
+  schema: not_run
+  files: not_run
+  reader_smoke_test: not_run
+  ancestry: passed
+  effect_scale: passed
+  sd_estimation: passed
+  sparse_regions: not_run
+reports: {}
+warnings: []
+errors: []
