@@ -14,6 +14,15 @@ never *worse* resolved than the historical fixed-250 convention. This matters
 because consumers truncate again at load time (default 0.9); if the stored count
 bound first, imputation would silently use less variance than requested.
 
+Each block's read+eigendecompose+write is independent (own matrix file, own npz
+output), so blocks run across a small pool of worker processes (issue #34)
+instead of one at a time. Unlike I/O-bound parallelism (e.g.
+resources/generators/gwas-ssf-ragged/generate.R's per-analysis download pool),
+this is memory-bound per block — a 15.6k-variant block's dense float64 matrix is
+~1.9 GB — so pick ``--jobs`` from available RAM headroom, not core count. See
+``find_underresolved_blocks.py`` in this directory for deriving the ``--blocks``
+list this script is usually pointed at.
+
 Usage:
   uv run python backfill_eigendecomposition.py \
       --panel /path/to/ld_reference_panel_hg38 --ancestry EUR
@@ -23,12 +32,21 @@ from __future__ import annotations
 
 import argparse
 import gzip
+import os
 import sys
 import tempfile
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
 import numpy as np
 import scipy.linalg
+
+# Deliberately conservative default (issue #34): each worker holds one block's
+# full dense LD matrix in memory at once, so raising this scales peak memory
+# roughly linearly, not throughput against a shared bottleneck. Meant to be
+# raised explicitly via --jobs (reasonable up to ~20) on a machine with enough
+# RAM headroom, rather than defaulting to os.cpu_count().
+DEFAULT_JOBS = 4
 
 
 def _read_ld_matrix(path: Path) -> np.ndarray:
@@ -38,8 +56,8 @@ def _read_ld_matrix(path: Path) -> np.ndarray:
     return np.asarray(rows, dtype=np.float64)
 
 
-def _eigendecompose(ld: np.ndarray, cumvar: float, min_k: int) -> tuple[np.ndarray, int]:
-    """Return (all eigenvalues descending, number of eigenvectors to keep)."""
+def _eigendecompose(ld: np.ndarray, cumvar: float, min_k: int) -> tuple[np.ndarray, np.ndarray, int]:
+    """Return (all eigenvalues descending, eigenvectors, number of eigenvectors to keep)."""
     vals, vecs = scipy.linalg.eigh(ld)
     vals = vals[::-1]
     vecs = vecs[:, ::-1]
@@ -57,8 +75,6 @@ def _write_npz(npz_path: Path, vals: np.ndarray, vecs: np.ndarray, k: int) -> No
     """Atomic write: temp then rename, so a crash never leaves a half-written cache."""
     fd, tmp_base = tempfile.mkstemp(suffix=".tmp", dir=npz_path.parent)
     Path(tmp_base).unlink(missing_ok=True)
-    import os
-
     os.close(fd)
     tmp_npz = Path(tmp_base + ".npz")
     try:
@@ -69,8 +85,57 @@ def _write_npz(npz_path: Path, vals: np.ndarray, vecs: np.ndarray, k: int) -> No
         raise
 
 
+def _process_block(base: Path, cumvar: float, min_k: int, out_suffix: str) -> str:
+    """Read+eigendecompose+write one block.
+
+    Runs inside a worker process (issue #34): each block's matrix file and npz
+    output are independent, so no state is shared across workers. Returns a
+    status line rather than printing directly, since worker stdout would
+    otherwise interleave across processes.
+    """
+    ld_path = base.with_suffix(".unphased.vcor1.gz")
+    npz_path = base.with_suffix(f"{out_suffix}.npz")
+    ld = _read_ld_matrix(ld_path)
+    if ld.ndim != 2 or ld.shape[0] != ld.shape[1]:
+        return f"!! not square {ld.shape} — skipping"
+    vals, vecs, k = _eigendecompose(ld, cumvar, min_k)
+    _write_npz(npz_path, vals, vecs, k)
+    clamped = np.maximum(vals, 0.0)
+    achieved = float(np.cumsum(clamped)[k - 1] / (clamped.sum() or 1.0))
+    return f"p={ld.shape[0]} k={k} cumvar={achieved:.4f}"
+
+
+def _run_sequential(missing: list[Path], cumvar: float, min_k: int, out_suffix: str) -> None:
+    for i, base in enumerate(missing, 1):
+        print(f"[{i}/{len(missing)}] {base}", flush=True)
+        try:
+            status = _process_block(base, cumvar, min_k, out_suffix)
+        except Exception as e:
+            status = f"!! failed: {e}"
+        print(f"  {status}", flush=True)
+
+
+def _run_parallel(missing: list[Path], cumvar: float, min_k: int, out_suffix: str, jobs: int) -> None:
+    with ProcessPoolExecutor(max_workers=jobs) as pool:
+        futures = {
+            pool.submit(_process_block, base, cumvar, min_k, out_suffix): base for base in missing
+        }
+        for i, future in enumerate(as_completed(futures), 1):
+            base = futures[future]
+            try:
+                status = future.result()
+            except Exception as e:
+                # A worker that dies outright (e.g. OOM-killed) surfaces here as the
+                # future's exception rather than corrupting another block's output —
+                # degrade to a normal failed line and let the rest of the pool finish.
+                status = f"!! failed: {e}"
+            print(f"[{i}/{len(missing)}] {base}\n  {status}", flush=True)
+
+
 def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__)
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     ap.add_argument("--panel", type=Path, required=True, help="Panel root (contains {ancestry}/)")
     ap.add_argument("--ancestry", required=True)
     ap.add_argument("--cumvar", type=float, default=0.99)
@@ -94,7 +159,24 @@ def main() -> int:
         help="Artifact suffix; use e.g. '.ldeig-rebuilt' to write alongside the "
              "existing decomposition instead of replacing it.",
     )
+    ap.add_argument(
+        "--jobs",
+        "-j",
+        type=int,
+        default=DEFAULT_JOBS,
+        help=f"Blocks to eigendecompose in parallel, across worker processes (issue "
+             f"#34; default {DEFAULT_JOBS}). Each worker holds one block's full dense "
+             f"LD matrix in memory (a 15.6k-variant block is ~1.9 GB), so this is "
+             f"memory-bound, not core-bound — size it to available RAM rather than "
+             f"cpu_count(). Reasonable up to ~20 on a machine with sufficient "
+             f"headroom. --jobs 1 runs sequentially in-process, matching the original "
+             f"(pre-issue-#34) behavior exactly.",
+    )
     args = ap.parse_args()
+
+    if args.jobs < 1:
+        print("--jobs must be >= 1", file=sys.stderr)
+        return 1
 
     root = args.panel / args.ancestry
     if not root.is_dir():
@@ -123,18 +205,12 @@ def main() -> int:
             print(f"  {b}")
         return 0
 
-    for i, base in enumerate(missing, 1):
-        ld_path = base.with_suffix(".unphased.vcor1.gz")
-        npz_path = base.with_suffix(f"{args.out_suffix}.npz")
-        print(f"[{i}/{len(missing)}] {base}", flush=True)
-        ld = _read_ld_matrix(ld_path)
-        if ld.ndim != 2 or ld.shape[0] != ld.shape[1]:
-            print(f"  !! not square {ld.shape} — skipping", flush=True)
-            continue
-        vals, vecs, k = _eigendecompose(ld, args.cumvar, args.min_k)
-        _write_npz(npz_path, vals, vecs, k)
-        achieved = float(np.cumsum(np.maximum(vals, 0.0))[k - 1] / (np.maximum(vals, 0.0).sum() or 1.0))
-        print(f"  p={ld.shape[0]} k={k} cumvar={achieved:.4f}", flush=True)
+    jobs = min(args.jobs, len(missing)) or 1
+    print(f"Running with {jobs} parallel job(s)", flush=True)
+    if jobs == 1:
+        _run_sequential(missing, args.cumvar, args.min_k, args.out_suffix)
+    else:
+        _run_parallel(missing, args.cumvar, args.min_k, args.out_suffix, jobs)
 
     print("done")
     return 0
