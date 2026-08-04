@@ -76,6 +76,24 @@ def main() -> int:
     ap.add_argument("--cumvar", type=float, default=0.99)
     ap.add_argument("--min-k", type=int, default=250)
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument(
+        "--force",
+        action="store_true",
+        help="Rewrite decompositions that already exist. Needed to re-resolve a panel "
+             "whose stored component count is too small for the consumer's truncation "
+             "(the UKB EUR panel stored a fixed 250, under-resolving 44%% of blocks).",
+    )
+    ap.add_argument(
+        "--blocks",
+        type=Path,
+        help="File of block base paths (one per line) to restrict the run to.",
+    )
+    ap.add_argument(
+        "--out-suffix",
+        default=".ldeig",
+        help="Artifact suffix; use e.g. '.ldeig-rebuilt' to write alongside the "
+             "existing decomposition instead of replacing it.",
+    )
     args = ap.parse_args()
 
     root = args.panel / args.ancestry
@@ -83,15 +101,23 @@ def main() -> int:
         print(f"No such panel ancestry directory: {root}", file=sys.stderr)
         return 1
 
+    if args.blocks:
+        candidates = [Path(line.strip()) for line in args.blocks.read_text().splitlines() if line.strip()]
+    else:
+        candidates = [
+            tsv.with_suffix("")
+            for chrom_dir in sorted(root.iterdir())
+            if chrom_dir.is_dir()
+            for tsv in sorted(chrom_dir.glob("*.tsv"))
+        ]
+
     missing = [
-        tsv.with_suffix("")
-        for chrom_dir in sorted(root.iterdir())
-        if chrom_dir.is_dir()
-        for tsv in sorted(chrom_dir.glob("*.tsv"))
-        if not tsv.with_suffix(".ldeig.npz").exists()
-        and tsv.with_suffix(".unphased.vcor1.gz").exists()
+        base
+        for base in candidates
+        if base.with_suffix(".unphased.vcor1.gz").exists()
+        and (args.force or not base.with_suffix(f"{args.out_suffix}.npz").exists())
     ]
-    print(f"{len(missing)} block(s) missing an eigendecomposition")
+    print(f"{len(missing)} block(s) to (re)build")
     if args.dry_run:
         for b in missing:
             print(f"  {b}")
@@ -99,7 +125,7 @@ def main() -> int:
 
     for i, base in enumerate(missing, 1):
         ld_path = base.with_suffix(".unphased.vcor1.gz")
-        npz_path = base.with_suffix(".ldeig.npz")
+        npz_path = base.with_suffix(f"{args.out_suffix}.npz")
         print(f"[{i}/{len(missing)}] {base}", flush=True)
         ld = _read_ld_matrix(ld_path)
         if ld.ndim != 2 or ld.shape[0] != ld.shape[1]:
