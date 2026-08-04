@@ -30,9 +30,33 @@ Usage:
 
 from __future__ import annotations
 
+import os
+
+# Must run before numpy/scipy are imported, and unconditionally (not just when
+# --jobs > 1): OpenBLAS reads these once, when its runtime initializes at
+# library load, not lazily per call — setting them later (e.g. in a
+# ProcessPoolExecutor `initializer`, which runs after each forked worker has
+# already inherited the parent's already-loaded, already-threaded BLAS) has no
+# effect. Without this, 20 worker *processes* each additionally fanning out to
+# OpenBLAS's own default of one thread per core meant this script's first
+# parallel run (issue #34, 20 jobs on a 224-core box with MAX_THREADS=64)
+# oversubscribed to 1000+ concurrent threads and ran slower than the original
+# sequential script it was replacing. Process-level parallelism via --jobs is
+# the only kind of parallelism this script uses; `setdefault` leaves an
+# operator's own pre-set thread env vars alone if they've deliberately
+# configured something else.
+for _blas_thread_var in (
+    "OMP_NUM_THREADS",
+    "OPENBLAS_NUM_THREADS",
+    "MKL_NUM_THREADS",
+    "NUMEXPR_NUM_THREADS",
+    "VECLIB_MAXIMUM_THREADS",
+    "BLIS_NUM_THREADS",
+):
+    os.environ.setdefault(_blas_thread_var, "1")
+
 import argparse
 import gzip
-import os
 import sys
 import tempfile
 from concurrent.futures import ProcessPoolExecutor, as_completed
