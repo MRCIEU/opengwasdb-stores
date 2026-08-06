@@ -1,0 +1,80 @@
+population	panel	status	reason	source_regions
+ACB		excluded	admixed_1kgp_population	AFR
+ASW		excluded	admixed_1kgp_population	AFR
+Adygei	EUR	included	continental_panel	EUR
+BEB	SAS	included	central_south_asia_panel	CSA
+Balochi	SAS	included	central_south_asia_panel	CSA
+BantuKenya	AFR	included	continental_panel	AFR
+BantuSouthAfrica	AFR	included	continental_panel	AFR
+Basque	EUR	included	continental_panel	EUR
+Bedouin		excluded	no_MID_or_NAF_panel	MID
+BiakaPygmy	AFR	included	continental_panel	AFR
+Brahui	SAS	included	central_south_asia_panel	CSA
+Burusho	SAS	included	central_south_asia_panel	CSA
+CDX	EAS	included	continental_panel	EAS
+CEU	EUR	included	continental_panel	EUR
+CHB	EAS	included	continental_panel	EAS
+CHS	EAS	included	continental_panel	EAS
+CLM		excluded	no_AMR_panel	AMR
+Cambodian	EAS	included	continental_panel	EAS
+Colombian		excluded	no_AMR_panel	AMR
+Dai	EAS	included	continental_panel	EAS
+Daur	EAS	included	continental_panel	EAS
+Druze		excluded	no_MID_or_NAF_panel	MID
+ESN	AFR	included	continental_panel	AFR
+FIN	EUR	included	continental_panel	EUR
+French	EUR	included	continental_panel	EUR
+GBR	EUR	included	continental_panel	EUR
+GIH	SAS	included	central_south_asia_panel	CSA
+GWD	AFR	included	continental_panel	AFR
+Han	EAS	included	continental_panel	EAS
+Hazara	SAS	included	central_south_asia_panel	CSA
+Hezhen	EAS	included	continental_panel	EAS
+IBS	EUR	included	continental_panel	EUR
+ITU	SAS	included	central_south_asia_panel	CSA
+Italian	EUR	included	continental_panel	EUR
+JPT	EAS	included	continental_panel	EAS
+Japanese	EAS	included	continental_panel	EAS
+KHV	EAS	included	continental_panel	EAS
+Kalash	SAS	included	central_south_asia_panel	CSA
+Karitiana		excluded	no_AMR_panel	AMR
+LWK	AFR	included	continental_panel	AFR
+Lahu	EAS	included	continental_panel	EAS
+MSL	AFR	included	continental_panel	AFR
+MXL		excluded	no_AMR_panel	AMR
+Makrani	SAS	included	central_south_asia_panel	CSA
+Mandenka	AFR	included	continental_panel	AFR
+Maya		excluded	no_AMR_panel	AMR
+MbutiPygmy	AFR	included	continental_panel	AFR
+Melanesian		excluded	no_OCE_panel	OCE
+Miao	EAS	included	continental_panel	EAS
+Mongola	EAS	included	continental_panel	EAS
+Mozabite		excluded	no_MID_or_NAF_panel	MID
+Naxi	EAS	included	continental_panel	EAS
+Orcadian	EUR	included	continental_panel	EUR
+Oroqen	EAS	included	continental_panel	EAS
+PEL		excluded	no_AMR_panel	AMR
+PJL	SAS	included	central_south_asia_panel	CSA
+PUR		excluded	no_AMR_panel	AMR
+Palestinian		excluded	no_MID_or_NAF_panel	MID
+Papuan		excluded	no_OCE_panel	OCE
+Pathan	SAS	included	central_south_asia_panel	CSA
+Pima		excluded	no_AMR_panel	AMR
+Russian	EUR	included	continental_panel	EUR
+STU	SAS	included	central_south_asia_panel	CSA
+San	AFR	included	continental_panel	AFR
+Sardinian	EUR	included	continental_panel	EUR
+She	EAS	included	continental_panel	EAS
+Sindhi	SAS	included	central_south_asia_panel	CSA
+Surui		excluded	no_AMR_panel	AMR
+TSI	EUR	included	continental_panel	EUR
+Tu	EAS	included	continental_panel	EAS
+Tujia	EAS	included	continental_panel	EAS
+Tuscan	EUR	included	continental_panel	EUR
+Uygur	EAS	included	continental_panel	EAS
+Xibo	EAS	included	continental_panel	EAS
+YRI	AFR	included	continental_panel	AFR
+Yakut	EAS	included	continental_panel	EAS
+Yi	EAS	included	continental_panel	EAS
+Yoruba	AFR	included	continental_panel	AFR
+synthetic_diploid_truth_sample		excluded	non_cohort_control	NA
