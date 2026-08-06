@@ -198,14 +198,14 @@ effect-scale validation should declare at least:
 | Field | Required | Description |
 |---|---:|---|
 | `resource_id` | Yes | Stable ID for this Reference Resource, referenced from `effect_scale_validation.reference_resources` or `ancestry_assignment.reference_resources`. |
-| `kind` | Yes | `reference_af` for single-ancestry allele-frequency lookup resources used by effect-scale validation; `ancestry_mixture` for multi-ancestry mixture-frequency resources used by AF-based ancestry assignment (issue #23); other kinds (for example LD panels) may reuse the same declaration shape. |
+| `kind` | Yes | `reference_af` for single-ancestry allele-frequency lookup resources used by effect-scale validation; `ancestry_mixture` for multi-ancestry mixture-frequency resources used by AF-based ancestry assignment (issue #23); `qc_panel` for the fixed QC variant panel unconditionally retained regardless of significance (issue #28/#29); other kinds (for example LD panels) may reuse the same declaration shape. |
 | `ancestry` | Yes for `reference_af` | Ancestry/population label the resource represents, matching the controlled `assigned_ancestry` vocabulary. For `ancestry_mixture` resources, which cover multiple super-populations at once, use `ancestry: multi` and list the covered super-populations in `super_populations` instead. |
 | `super_populations` | Yes for `ancestry_mixture` | List of super-population labels the mixture reference can assign to (for example `AFR, AMR, EAS, EUR, MID, NAF, SAS`). |
 | `genome_build` | Yes | Genome build of the resource's coordinates. |
 | `variant_id_convention` | Yes | Variant identifier/allele convention used by the resource, for example `chr:pos_ref_alt`, or `chr:pos:A1:A2 (A1 = min(allele1, allele2))` for the canonical ALID convention `opengwasdb.ancestry` uses. |
 | `allele_columns` | Optional | Column-name mapping the resource uses for effect/other allele and frequency, for example `{effect: EA, other: OA, freq: EAF}`. |
-| `location` | Yes | External path or URI for the resource, outside this repository. |
-| `location_kind` | Optional | How to interpret `location`, for example `external_directory` or `external_file`. |
+| `location` | Yes | External path or URI for the resource, outside this repository — except `kind: qc_panel`, whose panel file is small enough (~10k rows) to track directly in this repository, so `location` is a repo-relative path instead. |
+| `location_kind` | Optional | How to interpret `location`, for example `external_directory`, `external_file`, or `tracked_file` for a small resource tracked directly in this repository. |
 | `fine_group_map` | Yes for `ancestry_mixture` | External path to the fine-ancestry-group -> super-population map (one row per fine group in the resource) used to aggregate a fitted mixture to super-population composition. |
 
 Reference-AF and ancestry-mixture resources are recorded here for provenance;
@@ -264,6 +264,39 @@ reference's super-population codes (for example `AFR`, `AMR`, `EAS`, `EUR`,
 (`European`, `East Asian`, and so on) — the two vocabularies are related but
 distinct, and a reviewer comparing them should expect a translation, recorded
 per-Analysis in the ancestry sidecar's `source_assigned_mismatch`.
+
+### QC panel configuration
+
+`build.yaml` `filter.qc_panel` configures unconditional retention of the fixed
+QC variant panel (issue #28/#29/#30) for one release. Unlike the signal-driven
+sparse regions (`cis`/`significant_trans`/`suggestive_trans`), the QC panel is
+retained regardless of an Analysis's `p_value` distribution, so ancestry
+assignment and reference-AF effect-scale validation have a stable variant
+backbone even for Analyses with few or no genome-wide-significant hits:
+
+| Field | Required | Description |
+|---|---:|---|
+| `enabled` | Yes | Whether this release retains the QC panel in every Analysis's filtered file. |
+| `resource_id` | Yes when enabled | `resource_id` of the declared `kind: qc_panel` Reference Resource to retain (see "Reference Resource declaration"). |
+
+QC-panel retention is purely additive: a Store Family that does not configure
+`filter.qc_panel` behaves exactly as before this issue, and enabling it for
+one family never changes another's filtered output. Retained QC-panel rows
+are recorded in the sparse-region sidecar with `region_kind: qc_panel` (one
+row per chromosome the panel actually matched in that Analysis's source file,
+spanning the matched positions), distinct from the signal-driven region
+kinds, and `sidecars/filter_summary.tsv` gets a `qc_panel_rows` count per
+Analysis (`0` for families that do not configure a panel).
+
+Effect-scale validation (issue #16) and ancestry assignment (issue #23/#25)
+deliberately do not distinguish QC-panel rows from signal-driven rows when
+choosing which retained variants to use for AF/SD computations — both
+continue to consume every retained row with usable allele-frequency data
+uniformly. Retaining the QC panel already directly grows that pool for
+low-power Analyses; preferring QC-panel rows exclusively would need to
+discard perfectly good signal-driven rows for well-powered Analyses, for no
+demonstrated ascertainment benefit. This can be revisited if evidence of an
+ascertainment problem emerges, but is not assumed by default.
 
 ## `validation.yaml`
 
@@ -356,7 +389,7 @@ One row per retained region for ragged stores.
 |---|---:|---|
 | `analysis_id` | Yes | Registry Analysis ID matching `analyses.tsv`. |
 | `region_id` | Yes | Stable region identifier within the Analysis. |
-| `region_kind` | Yes | Controlled value such as `cis`, `significant_trans`, `suggestive_trans`, or `manual`. |
+| `region_kind` | Yes | Controlled value such as `cis`, `significant_trans`, `suggestive_trans`, `qc_panel`, or `manual`. `qc_panel` rows (issue #28/#30) mark the fixed QC panel's positions retained unconditionally, regardless of significance, when a Store Family configures `filter.qc_panel`; unlike the signal-driven kinds, `pvalue_threshold`/`lead_variant_id`/`target_id` are not applicable and are left blank. |
 | `chromosome` | Yes | Chromosome name in source coordinates. |
 | `start` | Yes | 1-based inclusive region start. |
 | `end` | Yes | 1-based inclusive region end. |

@@ -1,5 +1,5 @@
-status: passed_with_warnings
-validated_at: 2026-08-03T22:41:32.506753+00:00
+status: passed
+validated_at: 2026-08-04T00:07:10.842283+00:00
 validator:
   name: resources/generators/gwas-ssf-ragged/ancestry-assign.py
   version: null
@@ -7,46 +7,10 @@ checks:
   schema: not_run
   files: not_run
   reader_smoke_test: not_run
-  ancestry: passed_with_warnings
+  ancestry: passed
   effect_scale: passed
   sd_estimation: passed
   sparse_regions: not_run
 reports: {}
-warnings:
-  - GCST90201024: ancestry gate failed (overlap)
-  - GCST90201026: ancestry gate failed (overlap)
-  - GCST90201032: ancestry gate failed (overlap)
-  - GCST90201038: ancestry gate failed (overlap)
-  - GCST90201040: ancestry gate failed (overlap)
-  - GCST90202055: ancestry gate failed (overlap)
-  - GCST90202056: ancestry gate failed (overlap)
-  - GCST90202057: ancestry gate failed (overlap)
-  - GCST90202058: ancestry gate failed (overlap)
-  - GCST90202059: ancestry gate failed (overlap)
-  - GCST90202061: ancestry gate failed (overlap)
-  - GCST90202062: ancestry gate failed (overlap)
-  - GCST90202063: ancestry gate failed (overlap)
-  - GCST90202064: ancestry gate failed (overlap)
-  - GCST90202068: ancestry gate failed (overlap)
-  - GCST90202069: ancestry gate failed (overlap)
-  - GCST90202071: ancestry gate failed (overlap)
-  - GCST90202072: ancestry gate failed (overlap)
-  - GCST90202073: ancestry gate failed (overlap)
-  - GCST90199624: ancestry gate failed (overlap)
-  - GCST90199625: ancestry gate failed (overlap)
-  - GCST90199628: ancestry gate failed (overlap)
-  - GCST90199633: ancestry gate failed (overlap)
-  - GCST90203095: ancestry gate failed (overlap)
-  - GCST90203096: ancestry gate failed (overlap)
-  - GCST90203099: ancestry gate failed (overlap)
-  - GCST90203100: ancestry gate failed (overlap)
-  - GCST90203101: ancestry gate failed (overlap)
-  - GCST90203103: ancestry gate failed (overlap)
-  - GCST90203104: ancestry gate failed (overlap)
-  - GCST90203105: ancestry gate failed (overlap)
-  - GCST90203106: ancestry gate failed (overlap)
-  - GCST90203108: ancestry gate failed (overlap)
-  - GCST90203109: ancestry gate failed (overlap)
-  - GCST90203111: ancestry gate failed (overlap)
-  - GCST90203095: source_ancestry_label='South Asian' disagrees with AF-based dominant_superpop='EUR'
+warnings: []
 errors: []

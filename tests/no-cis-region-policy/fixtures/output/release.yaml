@@ -8,12 +8,12 @@ source_snapshot_id: fixture
 release_kind: one-off
 association_coverage: signals_only
 description: Fixture release proving the no-cis sparse-region policy (issue
-created_at: '2026-08-03T22:42:51Z'
+created_at: '2026-08-03T23:52:52Z'
 accepted_at: ~
 generator:
   name: resources/generators/gwas-ssf-ragged/generate.R
-  version: sha256:622763bd48f327ea52d1021e9c82d2dbf41663b9682fa0dbe8e524f9a58b99f7
-  command: Rscript resources/generators/gwas-ssf-ragged/generate.R --config=/tmp/Rtmpn84jjO/file1fa1e96ae5348b.yaml
+  version: sha256:d48e94f4170c4e91a8713c2891d4da46399ae53fed26867c2a40d86cc72b2dfe
+  command: Rscript resources/generators/gwas-ssf-ragged/generate.R --config=/tmp/RtmpDv7vIf/file2126d977f3454f.yaml
     --mode=emit
 source_defaults:
   source_genome_build: GRCh38

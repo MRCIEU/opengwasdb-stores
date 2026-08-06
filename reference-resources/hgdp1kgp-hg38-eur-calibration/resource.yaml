@@ -1,0 +1,24 @@
+resource_id: hgdp1kgp-hg38-eur-calibration
+label: HGDP+1kGP hg38 EUR LD calibration control
+kind: ld_panel
+ancestry: EUR
+genome_build: GRCh38
+variant_id_convention: "chr:pos:a1:a2"
+location: /data/opengwasdb/reference/hgdp1kgp-hg38/panel/EUR
+location_kind: external_directory
+ld:
+  representation: eigendecomposition
+  block_file: ld_regions_hg38.tsv
+  components_retained: variance_driven
+  components_cumvar_target: 0.99
+source:
+  cohort: HGDP + 1kGP harmonised callset
+  n_individuals: 771
+  variant_inclusion: MAC >= 50
+  generator: resources/scripts/ld-panel/run_panels.py
+status: available
+description: >
+  Non-production EUR control built genome-wide (1,357 blocks) using exactly the
+  production-panel constructor and parameters. A five-block, 2,514-analysis
+  paired masking comparison with gpm-hg38-eur-ld is the AFR/EAS/SAS release gate;
+  see docs/eur-panel-imputation-comparison.html.

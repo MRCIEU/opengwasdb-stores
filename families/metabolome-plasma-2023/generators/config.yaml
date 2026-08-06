@@ -17,6 +17,14 @@ notes: >
   af_source=source and ancestry assignment runs with real AF-based mixture
   fitting across four distinct ancestries (issue #23/#25).
 
+  Re-run for issue #31 with the fixed QC panel (issue #28/#29/#30) enabled:
+  the #27 baseline had 35/80 Analyses gate out on `overlap` for ancestry
+  assignment purely from low `af_overlap` (many under 20 variants) despite
+  several already showing a near-1.0 dominant proportion -- a sparse-signal
+  filtering artifact, not genuine ancestry ambiguity. See
+  `qc_panel_comparison.md` in this release directory for the full
+  before/after comparison.
+
 source:
   source_snapshot_id: gwas-catalog-v1.0.3.1-r2026-07-10
   ftp_base: http://ftp.ebi.ac.uk/pub/databases/gwas/summary_statistics
@@ -55,6 +63,9 @@ filter:
   suggestive_p: 1.0e-5
   suggestive_lead_min_distance_bp: 100000
   download_timeout_seconds: 3600
+  qc_panel:
+    enabled: true
+    resource_id: qc-panel-hg38
 
 # Reference-AF effect-scale validation (issue #16) also runs against this
 # release. Unlike the Sun pQTL pilot, this Source Collection provides usable
@@ -79,6 +90,15 @@ reference_resources:
     root: /data/opengwasdb/reference/ancestry-mixture/ref_freqs.hg38.tsv.gz
     fine_group_map: /data/opengwasdb/reference/ancestry-mixture/ancestry_groups.tsv
     location_kind: external_file
+  # Fixed QC panel (issue #28/#29/#30): retained unconditionally regardless
+  # of significance, giving ancestry assignment a stable variant backbone
+  # independent of how many significant hits a given Analysis has.
+  - resource_id: qc-panel-hg38
+    kind: qc_panel
+    genome_build: GRCh38
+    variant_id_convention: "chr:pos:A1:A2 (A1 = min(allele1, allele2))"
+    root: reference-resources/qc-panel-hg38/qc_panel.tsv
+    location_kind: tracked_file
 
 ancestry_assignment:
   enabled: true

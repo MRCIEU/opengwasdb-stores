@@ -20,6 +20,7 @@ shape:
 reference_resources: []
 effect_scale_validation: ~
 ancestry_assignment: ~
+qc_panel: ~
 validation:
   required: yes
 artifacts:

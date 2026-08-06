@@ -24,7 +24,17 @@ PYTHONPATH="${OPENGWASDB_REPO}" \
 `emit` freezes the selected analyses and writes a release bundle. `filter`
 downloads each full harmonised GWAS-SSF file transiently, writes a filtered
 GWAS-SSF-shaped file containing the configured sparse regions, deletes the full
-download, and stamps checksums/sizes back into `analyses.tsv`. `build-store.py`
+download, and stamps checksums/sizes back into `analyses.tsv`. Each Analysis's
+download+filter is independent (own download, own output file, only a shared
+read-only `targets` table), so `filter` runs them across a small pool of
+forked workers (`parallel::mclapply`, issue #32) instead of one at a time —
+configure the pool size with `filter.parallel_workers` in the family config or
+`--parallel-workers=N` on the command line; it defaults to 4, a deliberately
+conservative number chosen to avoid opening too many concurrent connections to
+EBI's public FTP rather than maxing out available cores. Per-analysis
+`download_seconds`/`filter_seconds`/`total_seconds` in
+`sidecars/filter_summary.tsv` and per-analysis error handling are unchanged by
+parallelising the run. `build-store.py`
 passes the filtered files to OpenGWASDB and records a small read-back report.
 `refresh-artifacts` updates artifact paths in an existing release bundle after
 changing `output.artifact_root` or `output.artifact_subdir`. `refresh-build`
@@ -93,6 +103,34 @@ The sparse policy implemented here is:
 - suggestive trans: non-cis and non-significant-trans variants with
   `significant_p < p_value <= suggestive_p`, kept as distance-pruned lead
   variants only.
+
+A Store Family may additionally opt into unconditionally retaining a fixed QC
+panel (issue #28/#29/#30), regardless of significance, by declaring a
+`kind: qc_panel` entry in `reference_resources` (see
+`reference-resources/qc-panel-hg38/`) and setting:
+
+```yaml
+filter:
+  qc_panel:
+    enabled: true
+    resource_id: qc-panel-hg38
+```
+
+`filter` then keeps any source row whose chromosome/position matches the
+panel in addition to whatever `cis`/`significant_trans`/`suggestive_trans`
+regions that Analysis already qualifies for, recording matched positions in
+`sidecars/sparse_regions.tsv` as `region_kind: qc_panel` (one row per
+chromosome actually matched) and a `qc_panel_rows` count in
+`sidecars/filter_summary.tsv`. This gives ancestry assignment and
+reference-AF effect-scale validation a stable variant backbone independent of
+how many significant hits a given Analysis has — useful for low-power
+Analyses that otherwise gate out on `low_overlap`/`overlap` for lack of
+retained variants, not for lack of genuine ancestry/scale evidence. It is
+opt-in and purely additive: Store Families that do not configure
+`filter.qc_panel` are unaffected. See `docs/release-metadata-schema.md`
+("QC panel configuration") for the full field reference, including the
+decision that effect-scale/ancestry stages treat QC-panel and signal-driven
+retained rows uniformly rather than preferring one over the other.
 
 A Store Family with no single encoding gene per Analysis (issue #26; for
 example small-molecule metabolomics, which has no one gene to draw a cis

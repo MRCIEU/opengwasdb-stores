@@ -1,0 +1,62 @@
+resource_id: hgdp1kgp-hg38-ld
+label: HGDP+1kGP hg38 LD reference panels (AFR, EAS, SAS)
+kind: ld_panel
+ancestry: [AFR, EAS, SAS]
+genome_build: GRCh38
+variant_id_convention: "chr:pos:a1:a2"
+allele_columns:
+  effect: EA
+  other: OA
+  freq: EAF
+location: /data/opengwasdb/reference/hgdp1kgp-hg38/panel
+location_kind: external_directory
+ld:
+  representation: eigendecomposition
+  block_file: ld_regions_hg38.tsv
+  components_retained: variance_driven
+  components_cumvar_target: 0.99
+source:
+  cohort: HGDP + 1kGP harmonised callset
+  n_individuals:
+    AFR: 804
+    EAS: 817
+    SAS: 783
+  variant_inclusion: MAC >= 50
+  population_map: populations_to_superpop.tsv
+  acquisition: resources/scripts/ld-panel/acquire_hgdp1kgp.py
+  generator: resources/scripts/ld-panel/
+description: >
+  Ancestry-specific LD Reference Panels for AFR, EAS and SAS, for reference
+  completion of Analyses whose Assigned Ancestry matches. Natively GRCh38, so no
+  liftover is applied. Same block layout and eigendecomposition format as
+  `gpm-hg38-eur-ld`, but variant identifiers are canonical store ALIDs
+  (`chr:pos:a1:a2`) rather than the EUR panel's `chr:pos_ref_alt`, so allele
+  orientation is unambiguous at rest.
+status: available
+notes: >
+  Structurally lower-powered than the EUR panel: HGDP+1kGP provides roughly
+  500-1,000 individuals per super-population against UK Biobank's ~50,000, so
+  these panels are rank-deficient where EUR is full-rank. This asymmetry is
+  permanent and affects completion quality independently of the Analyses being
+  completed. See ADR 0020.
+
+  Panel membership mirrors the ancestry-assignment super-population definitions
+  via an explicit recorded mapping. Admixed populations (1kGP ASW, ACB) are
+  excluded from AFR: recent admixture creates long-range LD absent from
+  continental African populations.
+
+  A matched HGDP+1kGP EUR panel is built separately as a calibration control (not
+  for production) to measure what the reduced sample size costs in imputation
+  quality, holding ancestry fixed. That result gates whether these panels ship.
+
+  Analyses assigned AMR, MID or NAF have no panel and remain observed-only:
+  `ld_regions_hg38.tsv` defines blocks for AFR/EAS/EUR/SAS only.
+
+  Canonical EUR boundaries were recovered from the 1,357 block artifacts at
+  /data/opengwasdb/reference/ukb-hg38/EUR and pinned in ld_regions_hg38.tsv;
+  this makes the matched EUR calibration layout identical to production.
+
+  Generation completed on 2026-08-06: AFR has 1,580 blocks, SAS has 1,267,
+  and EAS has 1,120 populated blocks. The remaining declared EAS interval,
+  chr14:16038675-16100330, lies before the first MAC-filtered chr14 variant
+  (18,223,583) and is explicitly empty rather than a failed decomposition.

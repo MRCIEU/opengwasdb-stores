@@ -1,0 +1,16 @@
+status: not_run
+validated_at: ~
+validator:
+  name: resources/generators/gwas-ssf-ragged/generate.R
+  version: ~
+checks:
+  schema: not_run
+  files: not_run
+  reader_smoke_test: not_run
+  ancestry: not_run
+  effect_scale: not_run
+  sd_estimation: not_run
+  sparse_regions: not_run
+reports: []
+warnings: []
+errors: []
