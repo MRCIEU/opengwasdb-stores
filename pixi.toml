@@ -1,0 +1,99 @@
+[workspace]
+name = "opengwasdb-stores"
+description = "Registry, generators, and reference-resource tooling for opengwasdb-stores"
+channels = ["conda-forge", "bioconda"]
+platforms = ["linux-64"]
+version = "0.1.0"
+
+# See docs/software-management-proposal.md for the design behind this file.
+# The sole user-facing execution interface is `pixi run <task>`.
+
+# ---------------------------------------------------------------------------
+# Features
+# ---------------------------------------------------------------------------
+
+[feature.python.dependencies]
+python = "3.11.*"
+pip = "*"
+numpy = ">=1.26,<2.5"
+scipy = ">=1.11"
+pyyaml = "*"
+
+[feature.store-build.dependencies]
+pandas = ">=2.0"
+scikit-learn = ">=1.3"
+zarr = ">=2.18,<3"
+numcodecs = ">=0.12,<0.13"
+typer = ">=0.12"
+pyliftover = ">=0.4"
+threadpoolctl = ">=3.0"
+
+[feature.store-build.pypi-dependencies]
+# Immutable pin (issue #41): a released version should replace this Git pin
+# once one exists. Do not float this to a branch. pysam is left off the conda
+# dependency list on purpose: opengwasdb's own PyPI dependency on it collides
+# (conda + PyPI wheel installing the same compiled extension into the same
+# environment) if pysam is also pinned via conda, so it is left for pip/uv to
+# resolve as a transitive PyPI dependency of opengwasdb itself.
+opengwasdb = { git = "https://github.com/explodecomputer/opengwasdb", rev = "f5bb1b50803e6bbab78078980b9c6b3dd98b6a1b" }
+
+[feature.r.dependencies]
+r-base = ">=4.3"
+"r-data.table" = "*"
+r-yaml = "*"
+# data.table::fread() shells out to R.utils to read .gz files directly; never
+# library()'d explicitly, so it's easy to miss auditing only `library()` calls.
+"r-r.utils" = "*"
+
+[feature.reporting.dependencies]
+r-dplyr = "*"
+r-ggplot2 = "*"
+r-knitr = "*"
+r-scales = "*"
+r-tibble = "*"
+r-tidyr = "*"
+r-jsonlite = "*"
+r-curl = "*"
+r-dt = "*"
+r-tidyverse = "*"
+quarto = "*"
+
+[feature.ld-panel.dependencies]
+plink2 = "*"
+bcftools = "*"
+curl = "*"
+
+[feature.dev.dependencies]
+git = "*"
+gh = "*"
+sqlite = "*"
+
+# ---------------------------------------------------------------------------
+# Environments
+# ---------------------------------------------------------------------------
+# Solve groups keep shared packages (numpy, r-data.table, ...) at one resolved
+# version across environments instead of letting each environment solve
+# independently, so "tested" and "production" stay the same build.
+
+[environments]
+default = { features = ["python", "store-build", "r"], solve-group = "main" }
+docs = { features = ["r", "reporting"], solve-group = "main" }
+ld-panel = { features = ["python", "ld-panel"], solve-group = "main" }
+dev = { features = ["python", "store-build", "r", "reporting", "ld-panel", "dev"], solve-group = "main" }
+
+# ---------------------------------------------------------------------------
+# Tasks
+# ---------------------------------------------------------------------------
+
+[feature.dev.tasks]
+test = { cmd = "python3 resources/scripts/run_all_tests.py" }
+test-python = { cmd = "python3 resources/scripts/run_all_tests.py --only python" }
+test-r = { cmd = "python3 resources/scripts/run_all_tests.py --only r" }
+env-check = { cmd = "python3 resources/scripts/env_check.py" }
+
+[feature.reporting.tasks]
+docs = { cmd = "bash resources/scripts/build-site.sh" }
+
+[feature.ld-panel.tasks]
+ld-acquire = { cmd = "python3 resources/scripts/ld-panel/acquire_hgdp1kgp.py" }
+ld-materialize = { cmd = "python3 resources/scripts/ld-panel/materialize_reference.py" }

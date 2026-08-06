@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 """Build and smoke-query a ragged GWAS-SSF release bundle with OpenGWASDB."""
 
 from __future__ import annotations

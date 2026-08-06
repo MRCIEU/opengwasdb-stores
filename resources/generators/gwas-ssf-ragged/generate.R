@@ -540,6 +540,7 @@ emit_bundle <- function(cfg, root) {
       version = script_version(root),
       command = command
     ),
+    build_environment = build_environment_info(root),
     source_defaults = list(
       source_genome_build = cfg$defaults$source_genome_build,
       license = cfg$defaults$license,
@@ -1098,6 +1099,7 @@ refresh_build_mode <- function(cfg, root) {
 args <- parse_args(commandArgs(trailingOnly = TRUE))
 root <- repo_root()
 source(path_abs(root, "resources/lib/effect_scale_validation.R"))
+source(path_abs(root, "resources/lib/build_environment.R"))
 cfg <- read_yaml(path_abs(root, args$config))
 cfg$.config_path <- args$config
 

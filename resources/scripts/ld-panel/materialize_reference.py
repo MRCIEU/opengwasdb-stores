@@ -36,11 +36,12 @@ def main() -> int:
     ap.add_argument("--pgen-jobs", type=int, default=4,
                     help="Concurrent ancestry/chromosome conversions (default 4)")
     ap.add_argument("--plink-threads", type=int, default=8); ap.add_argument("--plink-memory-mb", type=int, default=32768)
+    ap.add_argument("--plink2", default="plink2", help="plink2 executable (default: resolved from PATH)")
     args = ap.parse_args(); source = args.root / "source"; pgen = args.root / "pgen"
     if min(args.jobs, args.pgen_jobs, args.plink_threads, args.plink_memory_mb) < 1:
         ap.error("job, thread, and memory settings must be >= 1")
     pgen.mkdir(parents=True, exist_ok=True)
-    plink2 = args.root / "tools/bin/plink2"
+    plink2 = args.plink2
     pending = [(chrom, ancestry) for chrom in range(1, 23) for ancestry in args.ancestries
                if not Path(str(pgen / ancestry / f"chr{chrom}") + ".complete").exists()]
     running = {}

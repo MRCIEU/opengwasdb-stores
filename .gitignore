@@ -25,3 +25,8 @@ resources/data/gwas-ssf-ragged/
 families/*/releases/*/sidecars/*.partial.tsv
 
 __pycache__/
+
+# Pixi-managed environments/cache (issue #41): reproduced from pixi.toml +
+# pixi.lock, never committed.
+.pixi/
+*.egg-info/

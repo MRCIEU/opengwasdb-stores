@@ -6,18 +6,15 @@ should be stored as ragged observed-only OpenGWASDB stores.
 The generator is deliberately split into three steps:
 
 ```sh
-Rscript resources/generators/gwas-ssf-ragged/generate.R \
+pixi run Rscript resources/generators/gwas-ssf-ragged/generate.R \
   --config=families/pqtl-interval-2018/generators/config.yaml \
   --mode=emit
 
-Rscript resources/generators/gwas-ssf-ragged/generate.R \
+pixi run Rscript resources/generators/gwas-ssf-ragged/generate.R \
   --config=families/pqtl-interval-2018/generators/config.yaml \
   --mode=filter
 
-OPENGWASDB_REPO=/path/to/opengwasdb
-PYTHONPATH="${OPENGWASDB_REPO}" \
-  "${OPENGWASDB_REPO}/.venv/bin/python" \
-  resources/generators/gwas-ssf-ragged/build-store.py \
+pixi run python resources/generators/gwas-ssf-ragged/build-store.py \
   --release-dir=families/pqtl-interval-2018/releases/2018-sun-pilot-100
 ```
 
@@ -46,7 +43,7 @@ Run reference-AF effect-scale validation after `filter` and before
 `build-store.py` (issue #16):
 
 ```sh
-Rscript resources/generators/gwas-ssf-ragged/generate.R \
+pixi run Rscript resources/generators/gwas-ssf-ragged/generate.R \
   --config=families/pqtl-interval-2018/generators/config.yaml \
   --mode=effect-scale
 ```
@@ -71,10 +68,7 @@ Run AF-based ancestry assignment after `filter` (issues #23, #25), for
 releases whose Source Collection provides usable source allele frequencies:
 
 ```sh
-OPENGWASDB_REPO=/path/to/opengwasdb
-PYTHONPATH="${OPENGWASDB_REPO}" \
-  "${OPENGWASDB_REPO}/.venv/bin/python" \
-  resources/generators/gwas-ssf-ragged/ancestry-assign.py \
+pixi run python resources/generators/gwas-ssf-ragged/ancestry-assign.py \
   --release-dir=families/<family>/releases/<release>
 ```
 

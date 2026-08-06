@@ -10,7 +10,7 @@ qualifies for.
 Run from the repository root:
 
 ```sh
-Rscript tests/qc-panel-retention/run_tests.R
+pixi run Rscript tests/qc-panel-retention/run_tests.R
 ```
 
 This regenerates a single fixture Analysis with **zero** significant or

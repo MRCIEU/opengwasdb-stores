@@ -14,8 +14,7 @@ reference via `filter.qc_panel.resource_id` (issue #30).
 Run by `build_qc_panel.py` against `ukb-ancestry-mixture-hg38`:
 
 ```sh
-PYTHONPATH=/path/to/opengwasdb /path/to/opengwasdb/.venv/bin/python \
-  reference-resources/qc-panel-hg38/build_qc_panel.py \
+pixi run python reference-resources/qc-panel-hg38/build_qc_panel.py \
   --out=reference-resources/qc-panel-hg38/qc_panel.tsv
 ```
 

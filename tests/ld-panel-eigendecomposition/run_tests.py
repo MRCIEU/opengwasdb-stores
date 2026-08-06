@@ -12,42 +12,22 @@ on the npz files they produce rather than on internal helper functions,
 matching this repository's testing convention (see
 tests/ancestry-assignment/run_tests.py).
 
-Requires a Python with numpy/scipy (the opengwasdb repo's venv, by default;
-set OPENGWASDB_REPO to its checkout path if it is not a sibling of this repo).
+Requires numpy/scipy, e.g. via `pixi run test` (feature: python).
 """
 from __future__ import annotations
 
-import os
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
+
+import numpy as np
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS_DIR = REPO_ROOT / "resources" / "scripts" / "ld-panel"
 FIXTURES_DIR = REPO_ROOT / "tests" / "ld-panel-eigendecomposition" / "fixtures"
 PANEL_DIR = FIXTURES_DIR / "panel"
 CHROM_DIR = PANEL_DIR / "EUR" / "1"
-OPENGWASDB_REPO = Path(os.environ.get("OPENGWASDB_REPO", REPO_ROOT.parent / "opengwasdb"))
-
-
-def find_python() -> Path:
-    venv_python = OPENGWASDB_REPO / ".venv" / "bin" / "python"
-    if not venv_python.exists():
-        raise SystemExit(
-            f"Python with numpy/scipy not found at {venv_python}; set OPENGWASDB_REPO "
-            "to a checkout with a .venv containing them"
-        )
-    return venv_python
-
-
-try:
-    import numpy as np
-except ImportError:
-    # This driver script itself needs numpy to inspect the npz files the
-    # scripts under test produce, same as they do; re-exec under the venv
-    # python found above rather than requiring the caller to know that.
-    os.execv(str(find_python()), [str(find_python()), __file__, *sys.argv[1:]])
 
 n_checks = 0
 
@@ -92,7 +72,7 @@ def main() -> None:
     subprocess.run(
         [sys.executable, str(FIXTURES_DIR / "generate_fixtures.py")], cwd=REPO_ROOT, check=True,
     )
-    python = find_python()
+    python = Path(sys.executable)
 
     # --- find_underresolved_blocks.py: only the deliberately under-stored
     # block (1000-1040, 1 component stored vs 2 needed at thresh=0.9) should

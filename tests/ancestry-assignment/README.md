@@ -4,7 +4,7 @@ Fixture-based tests for `resources/generators/gwas-ssf-ragged/ancestry-assign.py
 (issues #23, #25). Run from the repository root:
 
 ```sh
-python3 tests/ancestry-assignment/run_tests.py
+pixi run python tests/ancestry-assignment/run_tests.py
 ```
 
 This regenerates `fixtures/` (deterministic; see `fixtures/generate_fixtures.py`),
@@ -23,8 +23,8 @@ margin), too few overlapping variants (gated out on overlap), an Analysis
 with no usable source allele frequencies (left untouched at
 `source_trusted_no_af`), and a source-label/AF-based disagreement.
 
-Requires the sibling `opengwasdb` repo's venv (numpy/scipy/`opengwasdb.ancestry`).
-Set `OPENGWASDB_REPO` if it isn't a sibling directory of this repo.
+Requires numpy/scipy/`opengwasdb.ancestry`, provided by the `dev`/`default`
+Pixi environments (issue #41).
 
 `ancestry-assign.py` and `resources/generators/gwas-ssf-ragged/build-store.py`
 both mutate `validation.yaml` in place via the shared

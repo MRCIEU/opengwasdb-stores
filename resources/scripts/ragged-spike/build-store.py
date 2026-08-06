@@ -1,10 +1,9 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 """Build the Sun-plasma-proteome ragged store from the filtered spike data and
 validate it by reading associations back — the #7 end-to-end check.
 
-Run with the opengwasdb venv + repo on the path:
-  PYTHONPATH=../opengwasdb ../opengwasdb/.venv/bin/python \
-      resources/scripts/ragged-spike/build-store.py
+Run with the store-build feature's environment:
+  pixi run python resources/scripts/ragged-spike/build-store.py
 """
 from __future__ import annotations
 

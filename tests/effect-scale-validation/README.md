@@ -1,16 +1,17 @@
 # Reference-AF effect-scale validation tests
 
 Fixture-based tests for the shared engine at `resources/lib/effect_scale_validation.R`
-(issues #16-#21). There is no CI runner wired up for this repository yet, so
-these are plain `Rscript`/`python3` checks that exit non-zero on failure,
-matching the existing `validate_emit()` smoke-check convention in
-`resources/generators/gwas-ssf-ragged/generate.R`.
+(issues #16-#21). They are plain `Rscript`/`python3` checks that exit non-zero
+on failure, matching the existing `validate_emit()` smoke-check convention in
+`resources/generators/gwas-ssf-ragged/generate.R`; `pixi run test` (issue #41)
+runs them, along with every other suite, from the repository's locked `dev`
+environment.
 
 Run from the repository root:
 
 ```sh
-Rscript tests/effect-scale-validation/run_tests.R
-python3 tests/effect-scale-validation/test_build_store_validation_merge.py
+pixi run Rscript tests/effect-scale-validation/run_tests.R
+pixi run python tests/effect-scale-validation/test_build_store_validation_merge.py
 ```
 
 `run_tests.R` regenerates `fixtures/` (deterministic; see
