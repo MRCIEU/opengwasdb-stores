@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 """Derive the QC panel from ukb-ancestry-mixture-hg38 (issue #29).
 
 Selects a fixed, reproducible list of ~10,000 variants that are common
@@ -24,8 +24,7 @@ Selection procedure:
      across reference-panel updates that only add density, not new regions.
 
 Usage:
-  PYTHONPATH=/path/to/opengwasdb /path/to/opengwasdb/.venv/bin/python \
-    reference-resources/qc-panel-hg38/build_qc_panel.py \
+  pixi run python reference-resources/qc-panel-hg38/build_qc_panel.py \
     --out=reference-resources/qc-panel-hg38/qc_panel.tsv
 
 Re-run with the same arguments any time ukb-ancestry-mixture-hg38 is rebuilt

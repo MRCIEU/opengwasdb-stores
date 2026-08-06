@@ -9,13 +9,11 @@ exactly as a real Store Family would, and asserts on the emitted
 release-bundle outputs (sidecar, analyses.tsv, validation.yaml) rather than on
 internal helper functions, matching this repository's testing convention.
 
-Requires the opengwasdb repo's venv (numpy/scipy/opengwasdb.ancestry). Set
-OPENGWASDB_REPO to its path if it is not a sibling of this repository.
+Requires numpy/scipy/opengwasdb, e.g. via `pixi run test` (feature: store-build).
 """
 from __future__ import annotations
 
 import csv
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -23,7 +21,6 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 FIXTURES_DIR = REPO_ROOT / "tests" / "ancestry-assignment" / "fixtures"
 RELEASE_DIR = FIXTURES_DIR / "release"
-OPENGWASDB_REPO = Path(os.environ.get("OPENGWASDB_REPO", REPO_ROOT.parent / "opengwasdb"))
 
 n_checks = 0
 
@@ -60,19 +57,13 @@ def main() -> None:
         [sys.executable, str(FIXTURES_DIR / "generate_fixtures.py")], cwd=REPO_ROOT, check=True,
     )
 
-    venv_python = OPENGWASDB_REPO / ".venv" / "bin" / "python"
-    if not venv_python.exists():
-        raise SystemExit(
-            f"opengwasdb venv not found at {venv_python}; set OPENGWASDB_REPO to its checkout path"
-        )
-    env = {**os.environ, "PYTHONPATH": str(OPENGWASDB_REPO)}
     result = subprocess.run(
         [
-            str(venv_python),
+            sys.executable,
             str(REPO_ROOT / "resources" / "generators" / "gwas-ssf-ragged" / "ancestry-assign.py"),
             f"--release-dir={RELEASE_DIR}",
         ],
-        cwd=REPO_ROOT, env=env,
+        cwd=REPO_ROOT,
     )
     if result.returncode != 0:
         raise SystemExit("ancestry-assign.py exited non-zero")

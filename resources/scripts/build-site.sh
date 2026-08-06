@@ -3,14 +3,15 @@
 # Render the reports and assemble the docs/ site that GitHub Pages serves
 # (Settings -> Pages -> Source: main branch, /docs folder).
 #
-# Requires `quarto` and `Rscript` on PATH (run inside your activated conda env,
-# where conda's quarto activation has set QUARTO_SHARE_PATH etc.).
+# Requires `quarto` and `Rscript` on PATH; run via the repository's Pixi
+# `docs` (or `dev`) environment (issue #41):
+#   pixi run --environment docs docs
 #
 # docs/index.html and docs/.nojekyll are hand-maintained and not regenerated
 # here. The imputation-filters report needs a ~2 GB summary-statistics download
 # plus its knitr cache, so it is only refreshed when a local render already
 # exists; render it explicitly with:
-#   quarto render resources/scripts/mvp-imputation-filters.qmd
+#   pixi run quarto render resources/scripts/mvp-imputation-filters.qmd
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"

@@ -6,6 +6,27 @@ This repository records what stores should exist, what source inputs define them
 how releases were produced, and what should be built next. It does not implement
 OpenGWASDB source readers, normalisation, storage layouts, or query engines.
 
+## Software Environment
+
+All Python, R, Quarto, and native tooling (PLINK2, bcftools) is managed by
+[Pixi](https://pixi.sh) from the root `pixi.toml`/`pixi.lock` (issue #41). A
+fresh checkout needs only Pixi installed, plus access to any declared external
+data. The sole execution interface is `pixi run <task>`:
+
+```sh
+pixi run env-check      # report/validate resolved tool + package versions
+pixi run test           # every lightweight test suite (Python + R)
+pixi run test-python    # Python suites only
+pixi run test-r         # R suites only
+pixi run --environment docs docs   # render and assemble the docs/ site
+pixi run --environment ld-panel ld-acquire -- --help
+pixi run --environment ld-panel ld-materialize -- --help
+```
+
+For a one-off script not wired to a named task, run it inside the environment
+with `pixi run python <script>.py` or `pixi run Rscript <script>.R` rather
+than invoking a bare interpreter or a sibling checkout's virtualenv.
+
 ## Model
 
 The core flow is:

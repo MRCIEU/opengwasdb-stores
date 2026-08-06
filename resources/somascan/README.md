@@ -32,8 +32,8 @@ coordinate was resolved:
 Regenerate from the repository root with:
 
 ```sh
-Rscript scripts/somascan/generate-somascan-targets.R
-Rscript scripts/somascan/generate-somascan-analysis-targets.R \
+pixi run Rscript scripts/somascan/generate-somascan-targets.R
+pixi run Rscript scripts/somascan/generate-somascan-analysis-targets.R \
   --pubmed-id=29875488 \
   --output=resources/somascan/sun-2018-analysis-targets.tsv
 ```

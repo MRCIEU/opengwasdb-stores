@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 """Run AF-based ancestry assignment over a release bundle (issues #23, #25).
 
 For each Analysis with usable source allele frequencies, builds a canonical
@@ -16,8 +16,7 @@ via the same shared merge helper the effect-scale stage's fix to
 build-store.py introduced, so no stage clobbers another's checks.
 
 Usage:
-  PYTHONPATH=/path/to/opengwasdb /path/to/opengwasdb/.venv/bin/python \
-    resources/generators/gwas-ssf-ragged/ancestry-assign.py \
+  pixi run python resources/generators/gwas-ssf-ragged/ancestry-assign.py \
     --release-dir=families/<family>/releases/<release>
 """
 

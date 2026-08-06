@@ -8,7 +8,7 @@ only significant/suggestive regions, never a fabricated cis window.
 Run from the repository root:
 
 ```sh
-Rscript tests/no-cis-region-policy/run_tests.R
+pixi run Rscript tests/no-cis-region-policy/run_tests.R
 ```
 
 This regenerates a tiny synthetic "full" GWAS-SSF source file (5 clustered
