@@ -86,7 +86,7 @@ def main() -> None:
     check(row["gate_reason"] == "ok" and row["dominant_superpop"] == "AFR",
           f"FIXT_AFR expected a clean AFR assignment, got {row}")
 
-    # Ambiguous 50/50 mixture -> gated out on margin, explicit reason, unassigned.
+    # Ambiguous 55/45 mixture -> gated out on margin, explicit reason, unassigned.
     row = sidecar["FIXT_MIXED"]
     check(row["gate_reason"] == "margin", f"FIXT_MIXED expected gate_reason=margin, got {row['gate_reason']}")
     check(analyses["FIXT_MIXED"]["ancestry_assignment_method"] == "unassigned",
