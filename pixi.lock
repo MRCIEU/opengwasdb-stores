@@ -145,7 +145,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/tzdata-2026c-h151e31d_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/wheel-0.47.0-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/zarr-2.18.7-pyhd8ed1ab_0.conda
-      - pypi: git+https://github.com/explodecomputer/opengwasdb?rev=f5bb1b50803e6bbab78078980b9c6b3dd98b6a1b#f5bb1b50803e6bbab78078980b9c6b3dd98b6a1b
+      - pypi: git+https://github.com/explodecomputer/opengwasdb?rev=fad80f216365eb14bb990805a70d6b8908213c56#fad80f216365eb14bb990805a70d6b8908213c56
       - pypi: https://files.pythonhosted.org/packages/13/6d/2e2a80cda66b152ec143ceb1784e56d8abc6abeeeb65f8ef6aa52c731038/pysam-0.24.0-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
   dev:
     channels:
@@ -416,7 +416,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/tzdata-2026c-h151e31d_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/wheel-0.47.0-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/zarr-2.18.7-pyhd8ed1ab_0.conda
-      - pypi: git+https://github.com/explodecomputer/opengwasdb?rev=f5bb1b50803e6bbab78078980b9c6b3dd98b6a1b#f5bb1b50803e6bbab78078980b9c6b3dd98b6a1b
+      - pypi: git+https://github.com/explodecomputer/opengwasdb?rev=fad80f216365eb14bb990805a70d6b8908213c56#fad80f216365eb14bb990805a70d6b8908213c56
       - pypi: https://files.pythonhosted.org/packages/13/6d/2e2a80cda66b152ec143ceb1784e56d8abc6abeeeb65f8ef6aa52c731038/pysam-0.24.0-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
   docs:
     channels:
@@ -4783,7 +4783,7 @@ packages:
   run_exports: {}
   size: 160679
   timestamp: 1744263184163
-- pypi: git+https://github.com/explodecomputer/opengwasdb?rev=f5bb1b50803e6bbab78078980b9c6b3dd98b6a1b#f5bb1b50803e6bbab78078980b9c6b3dd98b6a1b
+- pypi: git+https://github.com/explodecomputer/opengwasdb?rev=fad80f216365eb14bb990805a70d6b8908213c56#fad80f216365eb14bb990805a70d6b8908213c56
   name: opengwasdb
   version: 0.1.0
   requires_dist:
