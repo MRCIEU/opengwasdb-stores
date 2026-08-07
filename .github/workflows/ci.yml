@@ -28,4 +28,4 @@ jobs:
         run: pixi run --environment dev test
 
       - name: Documentation smoke test
-        run: pixi run --environment dev docs
+        run: pixi run --environment dev docs-smoke
