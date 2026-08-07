@@ -48,6 +48,52 @@ APIs, or endpoint manifests, and separately declares an OpenGWASDB Source Reader
 Capability for source data. The resolved metadata shape is common even when the
 provider and source format differ.
 
+## Metadata resolvers
+
+A metadata resolver is a small, independently callable module owned by one
+Source Collection (`gwas-catalog-ssf`, `opengwas-gwas-vcf`, ...) that resolves
+the interpretation-bearing fields `derive` cannot safely infer from the raw
+summary-statistics file alone: `stored_effect_scale`, `sample_size_kind`,
+`sample_size`, `n_cases`, and `n_controls`. Resolvers read the provider's own
+authoritative study/analysis metadata (a study table row, an API response, an
+endpoint manifest) — never the summary-statistics file itself, which may
+disagree with or omit this metadata (see issue #15's `ieu-a-7` example, where
+a GWAS-VCF `##SAMPLE` header declares `StudyType=Continuous` for a study the
+source API correctly reports as case-control).
+
+Conventionally, resolver modules live under `resources/lib/metadata_resolvers/`,
+one file per Source Collection, named for the resolved field set they share:
+`resolve_<source_collection>_metadata(...)`.
+
+Input is whatever raw metadata unit the provider exposes for one Analysis
+(free text, a parsed API record, ...); shape is provider-specific and not
+part of this contract. Output is always a single resolved record with these
+fields:
+
+| Field | Required | Description |
+|---|---:|---|
+| `resolution_status` | Yes | `resolved` or `unresolved`. Never a silent default — an Analysis whose metadata can't be established gets an explicit `unresolved` record, not a defaulted value that looks plausible. |
+| `resolution_notes` | Optional | Free-text reason when `resolution_status = unresolved`. |
+| `stored_effect_scale` | Optional | Same controlled vocabulary as `analyses.tsv`: `sd`, `log_or`, or `log_hazard`. `NA` when `resolution_status = unresolved`. |
+| `sample_size_kind` | Optional | Same controlled vocabulary as `analyses.tsv`: `total`, `case_control`, `effective`, or `variant_level`. `NA` when `resolution_status = unresolved`. |
+| `sample_size` | Optional | Scalar study N. `NA` when `resolution_status = unresolved`. |
+| `n_cases` | Optional | Case (or event) count. `NA` when not applicable (`sample_size_kind != case_control`) or unresolved. |
+| `n_controls` | Optional | Control (or non-event) count. `NA` when not applicable or unresolved. |
+
+A caller (a `derive` stage, or a curation script such as `ebi-studies.r`) may
+adapt this generic record onto its own legacy column names, but the resolver
+itself must not know which downstream shape it feeds — this is what lets
+`derive` stay agnostic to which provider it is talking to.
+
+The first implementation is `resources/lib/metadata_resolvers/gwas_catalog_ssf.R`
+(`resolve_gwas_catalog_ssf_metadata()`), which resolves GWAS Catalog's
+free-text "INITIAL SAMPLE SIZE" study field into these fields: a study whose
+parsed components include any `cases`/`controls` counts resolves as
+`case_control` with `stored_effect_scale = log_or` (GWAS-SSF harmonises
+case-control effect estimates to log odds ratio); otherwise it resolves as
+`total` with `stored_effect_scale = sd`; a field with no parseable numeric
+component resolves as `unresolved`.
+
 ## Column classes
 
 `analyses.tsv` spans three column classes:
