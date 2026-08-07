@@ -103,10 +103,17 @@ def main() -> None:
     write_ssf("FIXT_AFR.filtered.tsv.gz", [alid_to_ssf_row(a, reference_rows[a]["AFR_fine"]) for a in alids])
     analyses.append(base_analysis_row("FIXT_AFR", "African", "FIXT_AFR.filtered.tsv.gz"))
 
-    # FIXT_MIXED: exactly midway between EUR and SAS at every site -> ~50/50
-    # split, margin below the default delta=0.20 gate -> gated out ("margin").
+    # FIXT_MIXED: a 55/45 EUR/SAS blend at every site. An exact 50/50 blend
+    # would put the fitted dominant proportion right on the tau=0.50 gate
+    # boundary, where sub-percent NNLS solver differences across platforms
+    # (e.g. different BLAS/LAPACK backends between local dev and CI) can tip
+    # gate_reason between "proportion" and "margin". 55/45 keeps
+    # dominant_proportion (~0.55) safely above tau=0.50 while keeping margin
+    # (~0.10) safely below the default delta=0.20 gate, so this reliably
+    # exercises the margin gate specifically, not the proportion gate.
     mixed_rows = [
-        alid_to_ssf_row(a, (reference_rows[a]["EUR_fine"] + reference_rows[a]["SAS_fine"]) / 2) for a in alids
+        alid_to_ssf_row(a, 0.55 * reference_rows[a]["EUR_fine"] + 0.45 * reference_rows[a]["SAS_fine"])
+        for a in alids
     ]
     write_ssf("FIXT_MIXED.filtered.tsv.gz", mixed_rows)
     analyses.append(base_analysis_row("FIXT_MIXED", "European", "FIXT_MIXED.filtered.tsv.gz"))
