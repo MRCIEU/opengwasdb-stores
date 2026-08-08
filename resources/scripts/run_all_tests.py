@@ -28,6 +28,7 @@ SUITES: list[tuple[str, str, list[str]]] = [
     ("effect-scale-validation (merge)", "python", ["tests/effect-scale-validation/test_build_store_validation_merge.py"]),
     ("ld-panel-eigendecomposition", "python", ["tests/ld-panel-eigendecomposition/run_tests.py"]),
     ("ld-panel-generation", "python", ["tests/ld-panel-generation/run_tests.py"]),
+    ("metadata-resolvers/gwas-catalog-ssf", "r", ["tests/metadata-resolvers/gwas-catalog-ssf/run_tests.R"]),
     ("no-cis-region-policy", "r", ["tests/no-cis-region-policy/run_tests.R"]),
     ("qc-panel-retention", "r", ["tests/qc-panel-retention/run_tests.R"]),
 ]

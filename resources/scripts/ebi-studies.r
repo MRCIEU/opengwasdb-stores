@@ -30,7 +30,6 @@
 ## Family is created (see families/_candidates/).
 
 library(data.table)
-suppressPackageStartupMessages(library(tidyverse))
 
 MIN_GROUP_SIZE <- 100
 MOLECULAR_FRACTION_THRESHOLD <- 0.5
@@ -82,37 +81,31 @@ parse_variant_count <- function(platform) {
   out
 }
 
-## Parse the free-text "INITIAL SAMPLE SIZE" field into per-component counts,
-## split into cases / controls / unlabelled ("sample_size") individuals.
-## Numeric logic follows the caller's earlier curation function; the internal
-## per-component step is vectorised (rather than the original dplyr rowwise)
-## so parsing tens of thousands of distinct strings is not the bottleneck.
-parse_sample_size <- function(x) {
-  if (is.na(x)) return(NULL)
-  b <- gsub("(\\d),(?=\\d)", "\\1", x, perl = TRUE) %>%
-    strsplit(", ") %>%
-    unlist()
-  b1 <- grep("cases", b, value = TRUE)
-  b2 <- grep("controls", b, value = TRUE)
-  b3 <- b[!b %in% c(b1, b2)]
-  parse_bit <- function(b, name) {
-    if (length(b) == 0) return(NULL)
-    n <- vapply(strsplit(b, " "), function(toks) {
-      v <- suppressWarnings(as.numeric(toks))
-      v <- v[!is.na(v)]
-      if (length(v) == 0) 0 else v[1]
-    }, numeric(1))
-    text <- trimws(mapply(function(num, txt) gsub(as.character(num), "", txt),
-                          n, b, USE.NAMES = FALSE))
-    tibble(n = n, text = text, what = name)
+## Case-control/quantitative detection and sample-size counts are resolved by
+## the shared `gwas-catalog-ssf` metadata resolver (issue #48), not parsed
+## inline here -- see resources/lib/metadata_resolvers/gwas_catalog_ssf.R for
+## the resolver contract shared with other Source Collections' resolvers.
+source("resources/lib/metadata_resolvers/gwas_catalog_ssf.R")
+
+## Adapts the resolver's generic {resolution_status, stored_effect_scale,
+## sample_size_kind, sample_size, n_cases, n_controls} record onto this
+## script's legacy store-candidate output columns (study_design,
+## n_cases, n_controls, sample_size), preserving their existing values and
+## semantics exactly: n_cases/n_controls are 0 (not NA) for a resolved
+## quantitative study, and every column is NA when unresolved.
+resolve_study_design_columns <- function(x) {
+  resolved <- resolve_gwas_catalog_ssf_metadata(x)
+  if (resolved$resolution_status == "unresolved") {
+    return(data.table(n_cases = NA_real_, n_controls = NA_real_,
+                      sample_size = NA_real_, study_design = NA_character_))
   }
-  out <- bind_rows(
-    parse_bit(b1, "cases"),
-    parse_bit(b2, "controls"),
-    parse_bit(b3, "sample_size")
+  is_case_control <- resolved$sample_size_kind == "case_control"
+  data.table(
+    n_cases = if (is_case_control) resolved$n_cases else 0,
+    n_controls = if (is_case_control) resolved$n_controls else 0,
+    sample_size = resolved$sample_size,
+    study_design = if (is_case_control) "case-control" else "quantitative"
   )
-  if (!is.data.frame(out)) return(NULL)
-  out
 }
 
 ## Assign a molecular-omics type to free text (a trait label or a study
@@ -145,30 +138,6 @@ classify_molecular <- function(text) {
 safe_median <- function(x) if (all(is.na(x))) NA_real_ else median(x, na.rm = TRUE)
 safe_min <- function(x) if (all(is.na(x))) NA_real_ else min(x, na.rm = TRUE)
 safe_max <- function(x) if (all(is.na(x))) NA_real_ else max(x, na.rm = TRUE)
-
-## Collapse one INITIAL SAMPLE SIZE string to a single-row summary: total
-## cases, controls, and unlabelled individuals, a binary vs quantitative
-## design call, and a total initial sample size.
-summarise_sample_size <- function(x) {
-  parsed <- parse_sample_size(x)
-  if (is.null(parsed) || nrow(parsed) == 0) {
-    return(data.table(n_cases = NA_real_, n_controls = NA_real_,
-                      n_quantitative = NA_real_, sample_size = NA_real_,
-                      study_design = NA_character_))
-  }
-  n_cases <- sum(parsed$n[parsed$what == "cases"])
-  n_controls <- sum(parsed$n[parsed$what == "controls"])
-  n_quant <- sum(parsed$n[parsed$what == "sample_size"])
-  total <- n_cases + n_controls + n_quant
-  data.table(
-    n_cases = n_cases,
-    n_controls = n_controls,
-    n_quantitative = n_quant,
-    sample_size = fifelse(total > 0, total, NA_real_),
-    study_design = fifelse(total == 0, NA_character_,
-                    fifelse(n_cases + n_controls > 0, "case-control", "quantitative"))
-  )
-}
 
 studies_path <- file.path(data_dir, "gwas-catalog-v1.0.3.1-studies-r2026-07-10.tsv")
 ancestries_path <- file.path(data_dir, "gwas-catalog-v1.0.3.1-ancestries-r2026-07-10.tsv")
@@ -284,7 +253,7 @@ full[, has_gwas_hit := association_count > 0L]
 full[, molecular_subtype := classify_molecular(paste(DISEASE.TRAIT, MAPPED_TRAIT))]
 
 ss_unique <- unique(full$INITIAL.SAMPLE.SIZE)
-ss_lookup <- rbindlist(lapply(ss_unique, summarise_sample_size))
+ss_lookup <- rbindlist(lapply(ss_unique, resolve_study_design_columns))
 ss_lookup[, INITIAL.SAMPLE.SIZE := ss_unique]
 full <- merge(full, ss_lookup, by = "INITIAL.SAMPLE.SIZE", all.x = TRUE)
 
