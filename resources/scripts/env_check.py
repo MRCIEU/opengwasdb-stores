@@ -22,7 +22,7 @@ REQUIRED_PYTHON_PACKAGES = [
 
 REQUIRED_R_PACKAGES = [
     "data.table", "yaml", "R.utils", "dplyr", "ggplot2", "knitr", "scales",
-    "tibble", "tidyr", "jsonlite", "curl", "DT",
+    "tibble", "tidyr", "jsonlite", "curl", "DT", "httr",
 ]
 
 VERSION_FLAGS = {

@@ -94,6 +94,22 @@ case-control effect estimates to log odds ratio); otherwise it resolves as
 `total` with `stored_effect_scale = sd`; a field with no parseable numeric
 component resolves as `unresolved`.
 
+The second implementation is `resources/lib/metadata_resolvers/opengwas_api.R`
+(`resolve_opengwas_api_metadata()`, issue #49), for the `opengwas-gwas-vcf`
+Source Collection. It resolves a study's `ncase`/`ncontrol`/`sample_size`
+from the OpenGWAS API's own "gwasinfo" record rather than the source
+GWAS-VCF file's `##SAMPLE` header, which is not authoritative (issue #15's
+`ieu-a-7` example: the VCF header declares `StudyType=Continuous` with no
+case/control counts at all, while the OpenGWAS API correctly reports it as
+case-control). A usable `ncase`/`ncontrol` pair resolves as `case_control`
+with `stored_effect_scale = log_or`; otherwise a usable `sample_size`
+resolves as `total` with `stored_effect_scale = sd`; a record with neither
+resolves as `unresolved`. This resolver deliberately separates the pure
+resolution logic (`resolve_opengwas_api_metadata()`, fixture-tested) from
+the network transport that fetches a gwasinfo record
+(`fetch_opengwas_gwasinfo()`, untested here since it needs a live OpenGWAS
+API token).
+
 ## Column classes
 
 `analyses.tsv` spans three column classes:

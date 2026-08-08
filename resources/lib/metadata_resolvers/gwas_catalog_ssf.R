@@ -13,6 +13,7 @@
 # `reporting` feature tidyverse lives in.
 
 suppressPackageStartupMessages(library(data.table))
+source("resources/lib/metadata_resolvers/contract.R")
 
 # Splits one GWAS Catalog "INITIAL SAMPLE SIZE" string into its labelled
 # components, e.g. "10,007 cases, 474,591 controls" -> two rows tagged
@@ -59,21 +60,9 @@ suppressPackageStartupMessages(library(data.table))
 #'   `resolution_notes`, `stored_effect_scale`, `sample_size_kind`,
 #'   `sample_size`, `n_cases`, `n_controls`.
 resolve_gwas_catalog_ssf_metadata <- function(initial_sample_size) {
-  unresolved <- function(notes) {
-    data.table(
-      resolution_status = "unresolved",
-      resolution_notes = notes,
-      stored_effect_scale = NA_character_,
-      sample_size_kind = NA_character_,
-      sample_size = NA_real_,
-      n_cases = NA_real_,
-      n_controls = NA_real_
-    )
-  }
-
   parsed <- .parse_sample_size_components(initial_sample_size)
   if (is.null(parsed)) {
-    return(unresolved("INITIAL SAMPLE SIZE had no parseable case/control/quantitative counts"))
+    return(unresolved_metadata_record("INITIAL SAMPLE SIZE had no parseable case/control/quantitative counts"))
   }
 
   n_cases <- sum(parsed$n[parsed$what == "cases"])
@@ -81,7 +70,7 @@ resolve_gwas_catalog_ssf_metadata <- function(initial_sample_size) {
   n_quantitative <- sum(parsed$n[parsed$what == "sample_size"])
   total <- n_cases + n_controls + n_quantitative
   if (total == 0) {
-    return(unresolved("parsed sample-size components summed to zero"))
+    return(unresolved_metadata_record("parsed sample-size components summed to zero"))
   }
 
   is_case_control <- (n_cases + n_controls) > 0
