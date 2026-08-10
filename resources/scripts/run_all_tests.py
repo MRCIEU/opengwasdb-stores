@@ -31,6 +31,7 @@ SUITES: list[tuple[str, str, list[str]]] = [
     ("metadata-resolvers/gwas-catalog-ssf", "r", ["tests/metadata-resolvers/gwas-catalog-ssf/run_tests.R"]),
     ("metadata-resolvers/opengwas-api", "r", ["tests/metadata-resolvers/opengwas-api/run_tests.R"]),
     ("no-cis-region-policy", "r", ["tests/no-cis-region-policy/run_tests.R"]),
+    ("opengwas-gwas-vcf-dense", "r", ["tests/opengwas-gwas-vcf-dense/run_tests.R"]),
     ("qc-panel-retention", "r", ["tests/qc-panel-retention/run_tests.R"]),
 ]
 

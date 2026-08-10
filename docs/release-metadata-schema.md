@@ -101,12 +101,19 @@ from the OpenGWAS API's own "gwasinfo" record rather than the source
 GWAS-VCF file's `##SAMPLE` header, which is not authoritative (issue #15's
 `ieu-a-7` example: the VCF header declares `StudyType=Continuous` with no
 case/control counts at all, while the OpenGWAS API correctly reports it as
-case-control). A usable `ncase`/`ncontrol` pair resolves as `case_control`
-with `stored_effect_scale = log_or`; otherwise a usable `sample_size`
-resolves as `total` with `stored_effect_scale = sd`; a record with neither
-resolves as `unresolved`. This resolver deliberately separates the pure
-resolution logic (`resolve_opengwas_api_metadata()`, fixture-tested) from
-the network transport that fetches a gwasinfo record
+case-control). A usable `ncase`/`ncontrol` pair resolves `sample_size_kind`
+as `case_control`; otherwise a usable `sample_size` resolves it as `total`;
+a record with neither resolves as `unresolved`. `stored_effect_scale`
+primarily follows the API's `unit` field (`SD` -> `sd`, `log odds`/`logOR`
+-> `log_or`, a hazard-ratio unit -> `log_hazard`), falling back to
+`log_or`/`sd` from `ncase`/`ncontrol` presence only when `unit` is absent
+or unrecognised (issue #50 finding: the `ukb-b` batch's pipeline reports
+every trait, including binary traits with real `ncase`/`ncontrol`, on the
+SD scale, so inferring scale from case/control-count presence alone is
+wrong for that batch specifically -- `unit` is the authoritative signal).
+This resolver deliberately separates the pure resolution logic
+(`resolve_opengwas_api_metadata()`, fixture-tested against real captured
+API responses) from the network transport that fetches gwasinfo records
 (`fetch_opengwas_gwasinfo()`, untested here since it needs a live OpenGWAS
 API token).
 
@@ -147,7 +154,7 @@ release bundle; candidate bundles may leave lifecycle timestamps null.
 | `source_defaults.source_genome_build` | Yes | Default genome build for source files if not overridden in `analyses.tsv`. |
 | `source_defaults.license` | Yes | Default source licence if not overridden in `analyses.tsv`. |
 | `source_defaults.original_effect_scale` | Optional | Default original effect scale if constant across the release. |
-| `source_defaults.stored_effect_scale` | Yes | Default stored effect scale for OpenGWASDB when constant across the release: `sd`, `log_or`, or `log_hazard`. |
+| `source_defaults.stored_effect_scale` | Yes when constant across the release | Default stored effect scale for OpenGWASDB when constant across the release: `sd`, `log_or`, or `log_hazard`. Omit (null) when a release genuinely mixes scales per Analysis (for example a Source Collection resolved per-Analysis via a metadata resolver, issue #49/#50) — `analyses.tsv`'s per-row `stored_effect_scale` is authoritative in that case. |
 | `source_defaults.sample_size_kind` | Optional | Default sample-size kind if constant across the release. |
 | `source_defaults.source_ancestry_label` | Optional | Default source ancestry label if constant across the release. |
 | `source_defaults.assigned_ancestry` | Optional | Default assigned ancestry if constant across the release. |

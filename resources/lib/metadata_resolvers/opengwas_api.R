@@ -8,9 +8,18 @@
 # case/control counts at all, while the OpenGWAS API JSON for the same
 # study correctly reports `ncase=60801`/`ncontrol=123504`.
 #
-# Field names below (id, ncase, ncontrol, sample_size, ...) match the
+# Field names below (id, ncase, ncontrol, sample_size, unit, ...) match the
 # OpenGWAS API's own published GwasInfo schema
 # (https://api.opengwas.io/api/swagger.json, definitions.GwasInfo).
+#
+# stored_effect_scale is resolved from the `unit` field, not merely from
+# ncase/ncontrol presence (issue #50 finding, confirmed against live API
+# data): the ukb-b batch's BOLT-LMM/PHESANT pipeline reports every trait,
+# including Binary-category traits with real ncase/ncontrol, on the SD
+# scale (unit="SD") -- inferring log_or from ncase/ncontrol alone is wrong
+# for that batch specifically. `unit` is absent for some datasets (e.g. the
+# API's own literal placeholder string "NA"), so ncase/ncontrol presence
+# remains a secondary fallback for datasets with no usable `unit` value.
 #
 # Conforms to the resolver contract established by
 # resources/lib/metadata_resolvers/gwas_catalog_ssf.R (issue #48): one
@@ -18,6 +27,23 @@
 
 suppressPackageStartupMessages(library(data.table))
 source("resources/lib/metadata_resolvers/contract.R")
+
+# Maps the OpenGWAS API's free-text `unit` field to this resolver's
+# controlled stored_effect_scale vocabulary. Returns NA (not a guess) when
+# `unit` is absent, the API's literal placeholder string "NA", or an
+# unrecognised value, so callers know to fall back to a secondary signal
+# rather than trusting a misclassification. Real observed values include
+# "SD", "SD (kg/m^2)" (a quantitative trait's native unit appended), "log
+# odds", and "logOR".
+.classify_stored_effect_scale_from_unit <- function(unit) {
+  if (is.null(unit) || length(unit) == 0 || is.na(unit)) return(NA_character_)
+  normalised <- gsub("[^a-z]", "", tolower(unit))
+  if (!nzchar(normalised) || normalised == "na") return(NA_character_)
+  if (grepl("loghazard|hazardratio", normalised)) return("log_hazard")
+  if (grepl("logodds|logor", normalised)) return("log_or")
+  if (grepl("^sd", normalised)) return("sd")
+  NA_character_
+}
 
 #' Resolve one study's analytical metadata from an already-fetched OpenGWAS
 #' API "gwasinfo" record (see fetch_opengwas_gwasinfo() below to obtain
@@ -27,8 +53,8 @@ source("resources/lib/metadata_resolvers/contract.R")
 #'
 #' @param gwasinfo a named list as returned by one element of
 #'   jsonlite::fromJSON() on an OpenGWAS API gwasinfo response: relevant
-#'   fields are `ncase`, `ncontrol`, `sample_size` (all optional/nullable
-#'   per the API's own schema).
+#'   fields are `unit`, `ncase`, `ncontrol`, `sample_size` (all
+#'   optional/nullable per the API's own schema).
 #' @return a one-row data.table, same shape as
 #'   resolve_gwas_catalog_ssf_metadata(): resolution_status,
 #'   resolution_notes, stored_effect_scale, sample_size_kind, sample_size,
@@ -51,13 +77,22 @@ resolve_opengwas_api_metadata <- function(gwasinfo) {
   n_cases <- as_count(gwasinfo$ncase)
   n_controls <- as_count(gwasinfo$ncontrol)
   sample_size <- as_count(gwasinfo$sample_size)
-
   is_case_control <- !is.na(n_cases) && !is.na(n_controls)
+
+  scale_from_unit <- .classify_stored_effect_scale_from_unit(gwasinfo$unit)
+  stored_effect_scale <- if (!is.na(scale_from_unit)) {
+    scale_from_unit
+  } else if (is_case_control) {
+    "log_or"
+  } else {
+    "sd"
+  }
+
   if (is_case_control) {
     return(data.table(
       resolution_status = "resolved",
       resolution_notes = NA_character_,
-      stored_effect_scale = "log_or",
+      stored_effect_scale = stored_effect_scale,
       sample_size_kind = "case_control",
       sample_size = if (!is.na(sample_size)) sample_size else n_cases + n_controls,
       n_cases = n_cases,
@@ -69,7 +104,7 @@ resolve_opengwas_api_metadata <- function(gwasinfo) {
     return(data.table(
       resolution_status = "resolved",
       resolution_notes = NA_character_,
-      stored_effect_scale = "sd",
+      stored_effect_scale = stored_effect_scale,
       sample_size_kind = "total",
       sample_size = sample_size,
       n_cases = NA_real_,
@@ -80,10 +115,18 @@ resolve_opengwas_api_metadata <- function(gwasinfo) {
   unresolved_metadata_record("gwasinfo record had neither a usable ncase/ncontrol pair nor a usable sample_size")
 }
 
-#' Fetches one study's gwasinfo record from the live OpenGWAS API
-#' (`GET /api/gwasinfo?id=<id>`). Requires an OpenGWAS API JWT (see
-#' https://api.opengwas.io/) supplied via the OPENGWAS_JWT environment
-#' variable or the `jwt` argument.
+#' Fetches gwasinfo records for one or more OpenGWAS study IDs from the
+#' live API (`POST /api/gwasinfo?id=<id1>&id=<id2>...`; the API's `id`
+#' query parameter must be POSTed and repeated once per id -- a GET with no
+#' `id` parameter, or an `id` value the query encoder collapses to a single
+#' parameter, silently returns every dataset the caller has access to
+#' instead of filtering, so this is not just a style choice). Requires an
+#' OpenGWAS API JWT (see https://api.opengwas.io/) supplied via the
+#' OPENGWAS_JWT environment variable or the `jwt` argument. Automatically
+#' chunks `ids` into batches of `chunk_size` (default 100, the API's own
+#' flat-cost tier boundary per its published cost table) so a full Store
+#' Family batch can be resolved in a handful of requests rather than one
+#' per Analysis.
 #'
 #' This is registry-side metadata acquisition (resolving Analytical Metadata
 #' before a build starts, per docs/adr/0017-opengwasdb-owns-shared-analysis-schema.md),
@@ -102,27 +145,37 @@ resolve_opengwas_api_metadata <- function(gwasinfo) {
 #' tested, independently callable part of this resolver; this function is
 #' the thin, untested transport it is deliberately decoupled from.
 #'
-#' @param id OpenGWAS study ID, e.g. "ieu-a-7".
+#' @param ids character vector of OpenGWAS study IDs, e.g. "ieu-a-7".
 #' @param jwt OpenGWAS API bearer token.
-#' @return a parsed gwasinfo record (named list) for `id`, or NULL if the
-#'   API returned no record for it.
-fetch_opengwas_gwasinfo <- function(id, jwt = Sys.getenv("OPENGWAS_JWT")) {
+#' @param chunk_size maximum ids per request.
+#' @return a named list of parsed gwasinfo records, keyed by id. An id the
+#'   API returned no record for (withdrawn, no access, typo, ...) is simply
+#'   absent from the result -- callers must check for missing ids
+#'   themselves rather than assume every requested id comes back.
+fetch_opengwas_gwasinfo <- function(ids, jwt = Sys.getenv("OPENGWAS_JWT"), chunk_size = 100L) {
   if (!requireNamespace("httr", quietly = TRUE) || !requireNamespace("jsonlite", quietly = TRUE)) {
     stop("fetch_opengwas_gwasinfo() requires the httr and jsonlite packages")
   }
   if (!nzchar(jwt)) {
     stop("fetch_opengwas_gwasinfo() requires an OpenGWAS API JWT (set OPENGWAS_JWT or pass jwt=)")
   }
-  response <- httr::GET(
-    "https://api.opengwas.io/api/gwasinfo",
-    query = list(id = id),
-    httr::add_headers(Authorization = paste("Bearer", jwt))
-  )
-  httr::stop_for_status(response)
-  parsed <- jsonlite::fromJSON(
-    httr::content(response, "text", encoding = "UTF-8"),
-    simplifyVector = FALSE
-  )
-  if (is.null(parsed) || length(parsed) == 0) return(NULL)
-  parsed[[1]]
+  if (length(ids) == 0) return(list())
+
+  records <- list()
+  chunks <- split(ids, ceiling(seq_along(ids) / chunk_size))
+  for (chunk in chunks) {
+    query <- setNames(as.list(chunk), rep("id", length(chunk)))
+    response <- httr::POST(
+      "https://api.opengwas.io/api/gwasinfo",
+      query = query,
+      httr::add_headers(Authorization = paste("Bearer", jwt))
+    )
+    httr::stop_for_status(response)
+    parsed <- jsonlite::fromJSON(
+      httr::content(response, "text", encoding = "UTF-8"),
+      simplifyVector = FALSE
+    )
+    for (record in parsed) records[[record$id]] <- record
+  }
+  records
 }

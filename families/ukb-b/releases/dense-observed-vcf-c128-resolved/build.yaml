@@ -1,0 +1,26 @@
+store_family_id: ukb-b
+family_release_id: dense-observed-vcf-c128-resolved
+store_layout: dense-observed
+completion_state: observed-only
+builder:
+  package: opengwasdb
+  entrypoint: opengwasdb.layouts.dense.build_vcf:build_dense_from_vcf_manifest
+source:
+  source_format: gwas-vcf
+  source_reader_capability: opengwasdb.gwas-vcf
+  source_genome_build: GRCh37
+normalisation:
+  target_reference_assembly: GRCh38
+  liftover: hg19-to-hg38
+effects:
+  stored_effect_scale: ~
+shape:
+  association_coverage: full_gwas
+validation:
+  required: yes
+artifacts:
+  artifact_root: /data/opengwasdb
+  release_subdir: ukb-b/releases/dense-observed-vcf-c128-resolved
+  store_uri: /data/opengwasdb/wip/ukb-b-c128-resolved.opengwasdb
+notes: |
+  Not yet built. The physical store still needs an opengwasdb rebuild from this corrected manifest, and per the scope-boundary note above, even that rebuild would not pick up stored_effect_scale from this manifest until explodecomputer/opengwasdb#14 lands.
