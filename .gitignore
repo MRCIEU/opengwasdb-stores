@@ -30,3 +30,8 @@ __pycache__/
 # pixi.lock, never committed.
 .pixi/
 *.egg-info/
+
+# Local secrets (e.g. OPENGWAS_JWT for resources/lib/metadata_resolvers/
+# opengwas_api.R's fetch_opengwas_gwasinfo()); never committed.
+.Renviron
+.env
