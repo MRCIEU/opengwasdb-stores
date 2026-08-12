@@ -208,6 +208,15 @@ write_ssf("FIXT013.filtered.tsv.gz", fixt013)
 analyses[[length(analyses) + 1]] <- base_row("FIXT013", "sd", "sd", "", "declared_standardised",
                                               "European", "FIXT013.filtered.tsv.gz")
 
+# FIXT014: no source/reference AF, but a declared random-common-variant
+# sample reaches OpenGWASDB's lowest-confidence beta-distribution tier.
+beta14 <- c(-0.30, -0.20, -0.10, -0.05, 0.00, 0.05, 0.10, 0.20, 0.30, 0.40)
+write_ssf("FIXT014.filtered.tsv.gz", ssf_skeleton("99", 7000:7009, "A", "G", 0.01, af = "")[
+  , `:=`(beta = beta14, is_random_common_variant = TRUE)
+])
+analyses[[length(analyses) + 1]] <- base_row("FIXT014", "sd", "native", "", "unavailable",
+                                              "Unassigned", "FIXT014.filtered.tsv.gz")
+
 ref_table <- rbindlist(ref_rows)
 fwrite(ref_table, file.path(ref_dir, "1000-3100.tsv"), sep = "\t")
 ref_table_chr2 <- rbindlist(ref_rows_chr2)

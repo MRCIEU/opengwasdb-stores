@@ -29,6 +29,8 @@ lineage:
   derived_from: dense-observed-vcf-c128
 sidecars:
   derivations: sidecars/derivations.tsv
+  ancestry: sidecars/ancestry.tsv
+  sd_estimation: sidecars/sd_estimation.tsv
 notes: |
   Scope boundary (issue #50): this release makes the release manifest correct. It does not make opengwasdb build a store using these values -- as of the currently pinned opengwasdb commit, opengwasdb.layouts.dense.build_vcf calls read_vcf_study_type() on the raw VCF ##SAMPLE header unconditionally, with no code path that even considers a manifest-supplied stored_effect_scale. The builder-side half is tracked separately at explodecomputer/opengwasdb#14; do not treat this release as having fixed the ieu-a-7-shaped bug end-to-end until that is resolved too. ieu-a-7 itself is not a ukb-b analysis (it belongs to the unrelated ieu-a batch) and is not part of this batch to compare against.
   Out of scope for this release (unchanged from dense-observed-vcf-c128, not newly introduced here): `license`/`checksum`/`checksum_algorithm`/ `size_bytes` remain blank for every row, inherited as-is from the candidate manifest. This generator resolves only the fields issue #49/#50 scope it to (stored_effect_scale, sample_size_kind, sample_size, n_cases, n_controls); licence terms and file checksums need the source VCFs themselves, which this registry has no direct access to.

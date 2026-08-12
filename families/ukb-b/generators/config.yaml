@@ -45,6 +45,39 @@ defaults:
   source_genome_build: GRCh37
   target_reference_assembly: GRCh38
   liftover: hg19-to-hg38
+  liftover_chain: /data/opengwasdb/reference/liftover/hg19ToHg38.over.chain.gz
+
+reference_resources:
+  - resource_id: hgdp1kgp-ancestry-mixture-hg38
+    kind: ancestry_mixture
+    genome_build: GRCh38
+    location: /data/opengwasdb/reference/ancestry-mixture/ref_freqs.hg38.tsv.gz
+    fine_group_map: /data/opengwasdb/reference/ancestry-mixture/ancestry_groups.tsv
+  - resource_id: ukb-eur-reference-af-hg38
+    kind: reference_af
+    genome_build: GRCh38
+    root: /data/opengwasdb/reference/ukb-hg38
+    ancestry_dir: EUR
+
+ancestry_assignment:
+  enabled: true
+  reference_resource_id: hgdp1kgp-ancestry-mixture-hg38
+  sampling_chromosome: 1
+  max_reference_sites: 20000
+  maf_floor: 0.01
+  gates:
+    tau: 0.50
+    delta: 0.20
+    n_min: 5000
+    residual_max: 0.06
+
+effect_scale_validation:
+  enabled: true
+  min_overlap_variants: 20
+  sd_tolerance: 0.15
+  reference_resources:
+    - ancestry: EUR
+      resource_id: ukb-eur-reference-af-hg38
 
 output:
   release_dir: families/ukb-b/releases/dense-observed-vcf-c128-resolved

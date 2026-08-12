@@ -105,10 +105,14 @@ write_build_yaml <- function(cfg, release_dir) {
     ),
     normalisation = list(
       target_reference_assembly = cfg$defaults$target_reference_assembly %||% "GRCh38",
-      liftover = cfg$defaults$liftover
+      liftover = cfg$defaults$liftover,
+      liftover_chain = cfg$defaults$liftover_chain
     ),
     effects = list(stored_effect_scale = NULL),
     shape = list(association_coverage = cfg$association_coverage),
+    reference_resources = if (is.null(cfg$reference_resources)) list() else cfg$reference_resources,
+    ancestry_assignment = if (is.null(cfg$ancestry_assignment)) list(enabled = FALSE) else cfg$ancestry_assignment,
+    effect_scale_validation = if (is.null(cfg$effect_scale_validation)) list(enabled = FALSE) else cfg$effect_scale_validation,
     validation = list(required = TRUE),
     artifacts = list(
       artifact_root = cfg$output$artifact_root,
@@ -168,7 +172,11 @@ emit_bundle <- function(cfg, root, max_analyses = NA_integer_, only_analysis_id 
       sample_size_kind = NULL
     ),
     lineage = list(derived_from = cfg$lineage_derived_from %||% NULL),
-    sidecars = list(derivations = "sidecars/derivations.tsv"),
+    sidecars = list(
+      derivations = "sidecars/derivations.tsv",
+      ancestry = "sidecars/ancestry.tsv",
+      sd_estimation = "sidecars/sd_estimation.tsv"
+    ),
     notes = cfg$notes %||% ""
   ), file.path(release_dir, "release.yaml"))
 
@@ -181,7 +189,10 @@ emit_bundle <- function(cfg, root, max_analyses = NA_integer_, only_analysis_id 
     checks = list(
       schema = "not_run",
       files = "not_run",
-      reader_smoke_test = "not_run"
+      reader_smoke_test = "not_run",
+      ancestry = "not_run",
+      effect_scale = "not_run",
+      sd_estimation = "not_run"
     ),
     reports = list(metadata_resolution = "sidecars/derivations.tsv"),
     warnings = warnings_list,
@@ -224,6 +235,27 @@ validate_emit <- function(cfg, root) {
   if (nrow(needs_counts) && (any(is.na(needs_counts$n_cases)) || any(is.na(needs_counts$n_controls)))) {
     stop("n_cases/n_controls are required for every buildable log_or/log_hazard analysis")
   }
+  # Excluded rows are registry candidates deliberately withheld from the
+  # builder because their required Analytical Metadata could not be resolved;
+  # OpenGWASDB's shared build-input schema therefore applies to buildable rows.
+  schema_path <- file.path(release_dir, "analyses.tsv")
+  temporary_schema_path <- NULL
+  if (nrow(buildable) != nrow(analyses)) {
+    temporary_schema_path <- tempfile(fileext = ".analyses.tsv")
+    fwrite(buildable, temporary_schema_path, sep = "\t", na = "")
+    schema_path <- temporary_schema_path
+  }
+  schema <- validate_against_opengwasdb_schema(schema_path, root)
+  if (!is.null(temporary_schema_path)) unlink(temporary_schema_path)
+  validation_path <- file.path(release_dir, "validation.yaml")
+  validation <- if (file.exists(validation_path)) read_yaml(validation_path) else list(checks = list())
+  validation$checks$schema <- if (schema$passed) "passed" else "failed"
+  validation$errors <- if (schema$passed) list() else as.list(schema$errors)
+  write_yaml_file(validation, validation_path)
+  if (!schema$passed) {
+    stop("analyses.tsv failed opengwasdb's shared analyses.tsv schema:\n",
+         paste(" -", schema$errors, collapse = "\n"))
+  }
   cat(sprintf(
     "Release bundle schema smoke check passed for %d analyses (%d buildable, %d excluded)\n",
     nrow(analyses), nrow(buildable), nrow(analyses) - nrow(buildable)
@@ -235,6 +267,7 @@ root <- repo_root()
 source(path_abs(root, "resources/lib/metadata_resolvers/opengwas_api.R"))
 source(path_abs(root, "resources/lib/build_environment.R"))
 source(path_abs(root, "resources/lib/opengwas_gwas_vcf_dense.R"))
+source(path_abs(root, "resources/lib/schema_validate.R"))
 cfg <- read_yaml(path_abs(root, args$config))
 cfg$.config_path <- args$config
 
@@ -243,6 +276,10 @@ if (args$mode == "emit") {
   validate_emit(cfg, root)
 } else if (args$mode == "validate") {
   validate_emit(cfg, root)
+} else if (args$mode == "refresh-build") {
+  release_dir <- path_abs(root, cfg$output$release_dir)
+  write_build_yaml(cfg, release_dir)
+  cat("Refreshed ", file.path(release_dir, "build.yaml"), "\n", sep = "")
 } else {
   stop("Unknown --mode=", args$mode)
 }

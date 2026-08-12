@@ -4,9 +4,12 @@ validator:
   name: resources/generators/opengwas-gwas-vcf-dense/generate.R
   version: ~
 checks:
-  schema: not_run
+  schema: passed
   files: not_run
   reader_smoke_test: not_run
+  ancestry: not_run
+  effect_scale: not_run
+  sd_estimation: not_run
 reports:
   metadata_resolution: sidecars/derivations.tsv
 warnings:

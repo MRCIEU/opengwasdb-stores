@@ -117,6 +117,15 @@ API responses) from the network transport that fetches gwasinfo records
 (`fetch_opengwas_gwasinfo()`, untested here since it needs a live OpenGWAS
 API token).
 
+The third implementation is `resources/lib/metadata_resolvers/finngen_manifest.R`
+(`resolve_finngen_manifest_metadata()`, issue #57), for FinnGen's public endpoint
+manifest. Binary endpoint rows carry `num_cases` and `num_controls` and resolve
+to `log_or`/`case_control`. FinnGen encodes its inverse-rank-normalised
+quantitative endpoints with `category = Quantitative endpoints`, the total N in
+`num_cases`, and `num_controls = 0`; those rows resolve to `sd`/`total` without
+misrepresenting that total as a case count. Any other shape is explicit
+`unresolved`.
+
 ## Column classes
 
 `analyses.tsv` spans three column classes:

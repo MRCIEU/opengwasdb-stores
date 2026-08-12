@@ -58,6 +58,7 @@ r-yaml = "*"
 # tested resolve_opengwas_api_metadata() itself has no network dependency.
 r-httr = "*"
 r-jsonlite = "*"
+r-ieugwasr = ">=1.1.0,<2"
 
 [feature.reporting.dependencies]
 r-dplyr = "*"

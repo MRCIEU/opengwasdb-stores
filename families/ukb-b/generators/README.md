@@ -68,3 +68,16 @@ Each run calls the live OpenGWAS API (batched at up to 100 ids per
 request, per the API's own flat-cost pricing tier) and writes a fresh
 `sidecars/derivations.tsv` recording the resolved scale/sample-size
 evidence (or the unresolved reason) per Analysis.
+
+After the source VCFs are locally available, run the shared one-pass annotation
+stage. It uses OpenGWASDB's GWAS-VCF reader to extract AF and SE together, then
+feeds that extraction to OpenGWASDB's ancestry and phenotype-SD modules:
+
+```sh
+pixi run Rscript resources/scripts/download-opengwas-vcfs.R \
+  --ids=ukb-b-10787,ukb-b-11842,ukb-b-19953 \
+  --out-dir=/data/opengwasdb/wip/ukb-b-vcf
+
+pixi run python resources/generators/opengwas-gwas-vcf-dense/annotate.py \
+  --release-dir=families/ukb-b/releases/dense-observed-vcf-c128-resolved
+```

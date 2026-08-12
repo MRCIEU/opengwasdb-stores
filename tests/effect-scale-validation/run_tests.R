@@ -109,6 +109,12 @@ check(r$n_variants_retained == 10,
       "FIXT013 (chr1 + chr2 rows) should retain all 10 variants, got %s", r$n_variants_retained)
 check(r$status == "passed", "FIXT013 expected passed, got %s", r$status)
 
+r <- row("FIXT014")
+check(r$status == "passed", "FIXT014 beta fallback expected passed, got %s", r$status)
+check(r$original_sd_method == "estimated_from_beta_distribution",
+      "FIXT014 should reach estimated_from_beta_distribution, got %s", r$original_sd_method)
+check(r$af_source == "beta_distribution", "FIXT014 should record beta_distribution evidence")
+
 # --- #21: validation.yaml reflects empirical status, not vocab-only
 check(validation$checks$effect_scale == "failed",
       "validation.yaml checks.effect_scale should be failed (FIXT002 present), got %s", validation$checks$effect_scale)

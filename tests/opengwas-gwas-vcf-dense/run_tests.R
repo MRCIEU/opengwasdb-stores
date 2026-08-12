@@ -168,4 +168,40 @@ check(nrow(buildable_unfixed) == 2,
       nrow(buildable_unfixed))
 unlink(tmp_path)
 
+# --- #58: the dense generator delegates shared-core validation to
+# opengwasdb. Use one real, conforming emitted row, then prove failures in a
+# shared-only vocabulary/required column are caught (neither is in the dense
+# generator's registry-only structural checks).
+schema_tmp <- tempfile(pattern = "dense-schema-")
+dir.create(schema_tmp)
+schema_config <- file.path(schema_tmp, "config.yaml")
+writeLines(c("output:", paste0("  release_dir: ", schema_tmp)), schema_config)
+valid_schema_row <- fread(
+  "families/ukb-b/releases/dense-observed-vcf-c128-resolved/analyses.tsv",
+  sep = "\t", na.strings = "", colClasses = list(character = "exclude_from_build")
+)[analysis_id == "ukb-b-19953"]
+fwrite(valid_schema_row, file.path(schema_tmp, "analyses.tsv"), sep = "\t", na = "")
+writeLines(c("checks:", "  schema: not_run", "warnings: []", "errors: []"),
+           file.path(schema_tmp, "validation.yaml"))
+run_dense_validate <- function() {
+  output <- suppressWarnings(system2("Rscript", c(
+    "resources/generators/opengwas-gwas-vcf-dense/generate.R",
+    paste0("--config=", schema_config), "--mode=validate"
+  ), stdout = TRUE, stderr = TRUE))
+  status <- attr(output, "status")
+  if (is.null(status)) 0L else as.integer(status)
+}
+check(run_dense_validate() == 0L, "dense schema: conforming manifest should pass")
+
+bad_vocab <- copy(valid_schema_row)
+bad_vocab[, original_sd_method := "invented_method"]
+fwrite(bad_vocab, file.path(schema_tmp, "analyses.tsv"), sep = "\t", na = "")
+check(run_dense_validate() != 0L, "dense schema: shared out-of-vocabulary value should fail")
+check(grepl("schema: failed", paste(readLines(file.path(schema_tmp, "validation.yaml")), collapse = "\n")),
+      "dense schema: validation.yaml should record checks.schema=failed")
+
+missing_shared <- copy(valid_schema_row)[, original_effect_scale := NULL]
+fwrite(missing_shared, file.path(schema_tmp, "analyses.tsv"), sep = "\t", na = "")
+check(run_dense_validate() != 0L, "dense schema: missing shared required column should fail")
+
 cat(sprintf("ALL %d CHECKS PASSED\n", n_checks))

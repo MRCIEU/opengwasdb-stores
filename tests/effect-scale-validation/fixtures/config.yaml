@@ -35,6 +35,9 @@ effect_scale_validation:
   sd_tolerance: 0.15
   warning_multiplier: 2.0
   dispersion_max: 0.5
+  beta_distribution_fallback:
+    enabled: true
+    sample_kind: random_common_variants
   reference_resources:
     - ancestry: European
       resource_id: fixture-eur-af

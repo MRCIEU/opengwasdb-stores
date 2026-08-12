@@ -16,7 +16,9 @@ suppressPackageStartupMessages(library(data.table))
 
 `%||%` <- function(x, y) if (is.null(x) || length(x) == 0 || (length(x) == 1 && is.na(x))) y else x
 
-estimator_version <- "effect_scale_validation.R:v1"
+phenotype_sd_bridge <- normalizePath(
+  "resources/lib/phenotype_sd_estimate.py", winslash = "/", mustWork = FALSE
+)
 
 # ---------------------------------------------------------------------------
 # Reference AF resource access
@@ -180,9 +182,21 @@ resolve_source_af <- function(ssf_rows) {
 # Implied phenotype-SD diagnostics
 # ---------------------------------------------------------------------------
 
-implied_sd_from_se <- function(se, n, af) {
-  maf <- pmin(af, 1 - af)
-  se * sqrt(2 * n * maf * (1 - maf))
+estimate_phenotype_sd <- function(method, n, se = NULL, af = NULL, beta = NULL) {
+  if (!requireNamespace("jsonlite", quietly = TRUE)) {
+    stop("The OpenGWASDB phenotype-SD bridge requires the jsonlite R package")
+  }
+  python_bin <- Sys.which("python3")
+  if (!nzchar(python_bin)) stop("python3 not found on PATH; required for phenotype-SD estimation")
+  sample_size_arg <- if (length(n) == 1L && is.finite(n)) as.character(n) else "nan"
+  args <- c(phenotype_sd_bridge, "--method", method, "--sample-size", sample_size_arg)
+  if (!is.null(se)) args <- c(args, "--se", jsonlite::toJSON(as.double(se), auto_unbox = TRUE, digits = NA))
+  if (!is.null(af)) args <- c(args, "--af", jsonlite::toJSON(as.double(af), auto_unbox = TRUE, digits = NA))
+  if (!is.null(beta)) args <- c(args, "--beta", jsonlite::toJSON(as.double(beta), auto_unbox = TRUE, digits = NA))
+  output <- suppressWarnings(system2(python_bin, shQuote(args), stdout = TRUE, stderr = TRUE))
+  status <- attr(output, "status")
+  if (!is.null(status) && status != 0L) stop("OpenGWASDB phenotype-SD estimator failed: ", paste(output, collapse = "\n"))
+  jsonlite::fromJSON(paste(output, collapse = "\n"), simplifyVector = TRUE)
 }
 
 robust_dispersion <- function(x) {
@@ -220,7 +234,9 @@ default_thresholds <- function(cfg) {
     min_overlap_variants = as.integer(cfg$min_overlap_variants %||% 20L),
     sd_tolerance = as.double(cfg$sd_tolerance %||% 0.15),
     warning_multiplier = as.double(cfg$warning_multiplier %||% 2.0),
-    dispersion_max = as.double(cfg$dispersion_max %||% 0.5)
+    dispersion_max = as.double(cfg$dispersion_max %||% 0.5),
+    beta_distribution_fallback = isTRUE(cfg$beta_distribution_fallback$enabled),
+    beta_sample_kind = as.character(cfg$beta_distribution_fallback$sample_kind %||% "")
   )
 }
 
@@ -272,7 +288,7 @@ assess_analysis_effect_scale <- function(row, ssf_rows, reference_resources, thr
     maf_max = thresholds$maf_max,
     implied_sd_median = NA_real_,
     sd_dispersion = NA_real_,
-    estimator_version = estimator_version
+    estimator_version = ""
   )
 
   if (row$stored_effect_scale %in% c("log_or", "log_hazard")) {
@@ -295,6 +311,38 @@ assess_analysis_effect_scale <- function(row, ssf_rows, reference_resources, thr
   if (!nzchar(af_source)) {
     reference <- resolve_reference_resource(reference_resources, row$assigned_ancestry)
     if (is.null(reference)) {
+      beta_allowed <- isTRUE(thresholds$beta_distribution_fallback) &&
+        identical(thresholds$beta_sample_kind, "random_common_variants") &&
+        "is_random_common_variant" %in% names(ssf_rows) &&
+        nrow(ssf_rows) > 0L && all(ssf_rows$is_random_common_variant %in% TRUE)
+      if (beta_allowed && "beta" %in% names(ssf_rows)) {
+        beta <- suppressWarnings(as.double(ssf_rows$beta))
+        beta <- beta[is.finite(beta)]
+        estimate <- estimate_phenotype_sd(
+          "estimated_from_beta_distribution", suppressWarnings(as.double(row$sample_size)), beta = beta
+        )
+        base$n_variants_overlapping <- 0L
+        base$n_variants_excluded_ambiguous <- 0L
+        base$n_variants_excluded_mismatch <- 0L
+        base$n_variants_excluded_missing_af <- nrow(ssf_rows)
+        base$n_variants_excluded_maf <- 0L
+        base$n_variants_retained <- length(beta)
+        base$original_sd <- if (is.null(estimate$sd)) NA_real_ else as.double(estimate$sd)
+        base$original_sd_method <- estimate$method
+        base$implied_sd_median <- base$original_sd
+        base$sd_dispersion <- if (is.null(estimate$dispersion)) NA_real_ else as.double(estimate$dispersion)
+        base$estimator_version <- estimate$estimator_version
+        ok <- identical(estimate$method, "estimated_from_beta_distribution") &&
+          length(beta) >= thresholds$min_overlap_variants
+        return(as.data.table(c(base, list(
+          status = if (ok) "passed" else "skipped",
+          skip_reason = if (ok) "" else "low_overlap",
+          af_source = "beta_distribution",
+          sd_notes = if (!is.null(estimate$notes)) estimate$notes else sprintf(
+            "beta-distribution fallback over %d random common variants", length(beta)
+          )
+        ))))
+      }
       return(as.data.table(c(base, list(
         status = "skipped", skip_reason = "no_reference_resource_for_ancestry", af_source = "",
         sd_notes = sprintf("No configured reference AF resource for assigned_ancestry='%s'", row$assigned_ancestry %||% "")
@@ -351,14 +399,17 @@ assess_analysis_effect_scale <- function(row, ssf_rows, reference_resources, thr
   af_final <- reference_af[within_bounds]
   n <- suppressWarnings(as.double(row$sample_size))
   valid <- !is.na(se) & !is.na(af_final) & is.finite(n) & n > 0
-  implied <- implied_sd_from_se(se[valid], n, af_final[valid])
+  method <- if (af_source == "source") "estimated_from_source_maf" else "estimated_from_reference_maf"
+  estimate <- estimate_phenotype_sd(method, n, se = se[valid], af = af_final[valid])
+  implied <- se[valid] * sqrt(2 * n * af_final[valid] * (1 - af_final[valid]))
   implied <- implied[is.finite(implied)]
 
   base$n_variants_retained <- length(implied)
   median_sd <- if (length(implied)) stats::median(implied) else NA_real_
-  dispersion <- if (length(implied) >= 2) robust_dispersion(implied) else NA_real_
+  dispersion <- if (is.null(estimate$dispersion)) NA_real_ else as.double(estimate$dispersion)
   base$implied_sd_median <- median_sd
   base$sd_dispersion <- dispersion
+  base$estimator_version <- estimate$estimator_version
 
   decision <- classify_status(length(implied), thresholds, median_sd, dispersion, row$original_sd_method)
 
@@ -367,8 +418,8 @@ assess_analysis_effect_scale <- function(row, ssf_rows, reference_resources, thr
   if (decision$status %in% c("passed", "warning") &&
       !identical(row$original_sd_method, "declared_standardised") &&
       (is.na(updated_sd) || !nzchar(as.character(row$original_sd)))) {
-    updated_sd <- median_sd
-    updated_method <- if (af_source == "source") "estimated_from_source_maf" else "estimated_from_reference_maf"
+    updated_sd <- as.double(estimate$sd)
+    updated_method <- estimate$method
   }
   base$original_sd <- updated_sd
   base$original_sd_method <- updated_method
