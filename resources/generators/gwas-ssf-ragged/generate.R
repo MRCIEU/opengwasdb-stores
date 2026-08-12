@@ -1007,13 +1007,24 @@ filter_release <- function(cfg, root, max_analyses = NA_integer_, only_analysis_
 
 validate_emit <- function(cfg, root) {
   release_dir <- path_abs(root, cfg$output$release_dir)
-  analyses <- fread(file.path(release_dir, "analyses.tsv"), sep = "\t", na.strings = "")
+  analyses_path <- file.path(release_dir, "analyses.tsv")
+  analyses <- fread(analyses_path, sep = "\t", na.strings = "")
   has_targets <- has_gene_targets(cfg)
+  # Registry-only and family-specific structural requirements (issue #51):
+  # opengwasdb's shared core schema deliberately does not know about these
+  # (source location/provenance columns, this generator's dense
+  # analysis_index invariant, or the single-gene-target columns), so they
+  # stay this repository's own concern rather than being pushed onto
+  # opengwasdb (see docs/adr/0017-opengwasdb-owns-shared-analysis-schema.md's
+  # column-class split). Shared-core required columns and controlled
+  # vocabularies (stored_effect_scale, sample_size_kind/scope/size,
+  # original_effect_scale, original_sd_method, ancestry_assignment_method)
+  # are validated below against opengwasdb's own schema instead of a
+  # hand-rolled, driftable copy of the same list.
   required <- c(
     "analysis_index", "analysis_id", "source_analysis_id", "source_label",
     "trait_ontology_name", "trait_ontology_id", "source_file",
-    "source_genome_build", "license", "stored_effect_scale", "sample_size_kind",
-    "sample_size_scope", "sample_size", "filtered_file"
+    "source_genome_build", "license", "filtered_file"
   )
   # trait_id/gene_id/gene_name/trait_chr/trait_bp/n/mhc are single-gene-target
   # columns (issue #26): required only for Store Families with a resolvable
@@ -1027,24 +1038,53 @@ validate_emit <- function(cfg, root) {
   if (!identical(analyses$analysis_index, seq_len(nrow(analyses)) - 1L)) {
     stop("analysis_index must be dense 0..n-1")
   }
-  if (any(is.na(analyses$sample_size))) stop("sample_size is required for every analysis")
   if (has_targets && any(is.na(analyses$trait_chr) | is.na(analyses$trait_bp))) {
     stop("trait_chr and trait_bp are required for every selected analysis")
   }
-  if (any(!analyses$stored_effect_scale %in% c("sd", "log_or", "log_hazard"))) {
-    stop("stored_effect_scale must be sd, log_or, or log_hazard")
+
+  schema <- validate_against_opengwasdb_schema(analyses_path, root)
+  if (!schema$passed) {
+    merge_validation_checks(
+      release_dir, list(schema = "failed", errors = schema$errors),
+      "resources/generators/gwas-ssf-ragged/generate.R"
+    )
+    stop(
+      "analyses.tsv failed opengwasdb's shared analyses.tsv schema:\n",
+      paste(" -", schema$errors, collapse = "\n")
+    )
   }
-  cat(sprintf("Release bundle schema smoke check passed for %d analyses\n", nrow(analyses)))
+  merge_validation_checks(
+    release_dir, list(schema = "passed"),
+    "resources/generators/gwas-ssf-ragged/generate.R"
+  )
+
+  cat(sprintf(
+    "Release bundle schema check passed for %d analyses (registry structure + opengwasdb shared core)\n",
+    nrow(analyses)
+  ))
 }
 
+# Merges `checks` (any of the canonical checks.* keys, e.g. schema/
+# effect_scale/sd_estimation) plus accumulated warnings/errors into an
+# existing validation.yaml without discarding checks recorded by a different
+# stage -- the emit-time schema check, the effect-scale stage, and the build
+# step each own different keys and must not clobber one another.
 merge_validation_checks <- function(release_dir, checks, validator_name) {
   path <- file.path(release_dir, "validation.yaml")
   current <- if (file.exists(path)) read_yaml(path) else list(status = "not_run", checks = list())
-  current$checks$effect_scale <- checks$effect_scale
-  current$checks$sd_estimation <- checks$sd_estimation
-  existing_warnings <- current$warnings
-  if (!is.list(existing_warnings)) existing_warnings <- list()
-  current$warnings <- as.list(unique(c(unlist(existing_warnings), checks$warnings)))
+  known_checks <- c(
+    "schema", "files", "reader_smoke_test", "ancestry",
+    "effect_scale", "sd_estimation", "sparse_regions"
+  )
+  for (key in intersect(names(checks), known_checks)) {
+    current$checks[[key]] <- checks[[key]]
+  }
+  # yaml::read_yaml() parses a single-element YAML sequence as a bare
+  # character vector, not a list -- as.list() (rather than an `is.list()`
+  # guard that resets to list()) normalises both shapes without discarding
+  # a lone pre-existing warning/error recorded by an earlier stage.
+  current$warnings <- as.list(unique(c(unlist(as.list(current$warnings)), checks$warnings)))
+  current$errors <- as.list(unique(c(unlist(as.list(current$errors)), checks$errors)))
 
   status_rank <- c(not_run = 0L, passed = 1L, passed_with_warnings = 2L, failed = 3L)
   check_values <- unlist(current$checks[!vapply(current$checks, is.null, logical(1))])
@@ -1100,6 +1140,7 @@ args <- parse_args(commandArgs(trailingOnly = TRUE))
 root <- repo_root()
 source(path_abs(root, "resources/lib/effect_scale_validation.R"))
 source(path_abs(root, "resources/lib/build_environment.R"))
+source(path_abs(root, "resources/lib/schema_validate.R"))
 cfg <- read_yaml(path_abs(root, args$config))
 cfg$.config_path <- args$config
 

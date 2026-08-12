@@ -36,12 +36,15 @@ threadpoolctl = ">=3.0"
 # environment) if pysam is also pinned via conda, so it is left for pip/uv to
 # resolve as a transitive PyPI dependency of opengwasdb itself.
 #
-# Bumped for issue #40: explodecomputer/opengwasdb#10 ("Consume LD Reference
-# Panels as eigendecompositions") merged as opengwasdb PR #12
-# (consume-ld-panel-eigendecomposition-v2); this pin is that merge commit,
-# needed so opengwasdb.completion.ld_panel.list_all_blocks stops requiring an
-# LD matrix file and actually loads eigendecomposition-only panel blocks.
-opengwasdb = { git = "https://github.com/explodecomputer/opengwasdb", rev = "fad80f216365eb14bb990805a70d6b8908213c56" }
+# Bumped for issue #51: explodecomputer/opengwasdb#16 ("Add analyses.tsv
+# schema module") published opengwasdb.model.analyses (validate_analyses(),
+# to_json_schema()) -- the shared core schema this registry's checks.schema
+# validates emitted manifests against, replacing this repository's
+# hand-rolled per-generator column-name checks. This pin is opengwasdb's
+# main HEAD at the time of the bump, which also carries #17-#19's
+# manifest-authority/reader-capability/SD-estimator work (ADR-0012-owned
+# statistical logic) issue #15's breakdown depends on.
+opengwasdb = { git = "https://github.com/explodecomputer/opengwasdb", rev = "197a77c499b013cf9c45c6b920715bca740f5a4e" }
 
 [feature.r.dependencies]
 r-base = ">=4.3"

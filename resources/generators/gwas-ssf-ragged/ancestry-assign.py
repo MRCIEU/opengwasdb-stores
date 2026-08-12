@@ -38,7 +38,8 @@ from resources.lib.release_yaml import (  # noqa: E402
     resolve_path,
 )
 
-from opengwasdb.ancestry import Gates, assign_ancestry, is_palindromic, load_reference  # noqa: E402
+from opengwasdb.ancestry import Gates, assign_ancestry, load_reference  # noqa: E402
+from opengwasdb.readers import is_palindromic  # noqa: E402
 from opengwasdb.variants.normalise import VariantNormalisationError, orient_to_canonical  # noqa: E402
 
 # Best-effort mapping from this registry's free-text source ancestry labels

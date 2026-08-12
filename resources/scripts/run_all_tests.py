@@ -33,6 +33,7 @@ SUITES: list[tuple[str, str, list[str]]] = [
     ("no-cis-region-policy", "r", ["tests/no-cis-region-policy/run_tests.R"]),
     ("opengwas-gwas-vcf-dense", "r", ["tests/opengwas-gwas-vcf-dense/run_tests.R"]),
     ("qc-panel-retention", "r", ["tests/qc-panel-retention/run_tests.R"]),
+    ("schema-validation", "r", ["tests/schema-validation/run_tests.R"]),
 ]
 
 
