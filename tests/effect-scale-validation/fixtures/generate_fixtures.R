@@ -80,7 +80,7 @@ base_row <- function(analysis_id, stored_effect_scale, original_effect_scale, or
   data.table(
     analysis_index = length(analyses), analysis_id = analysis_id, source_analysis_id = analysis_id,
     source_label = sprintf("Fixture analysis %s", analysis_id),
-    trait_ontology_name = "", trait_ontology_id = "",
+    trait_ontology_label = "", trait_ontology_id = "",
     source_file = file.path("filtered", filtered_file), filtered_file = filtered_file,
     source_bundle_id = "", checksum = "", checksum_algorithm = "sha256", size_bytes = "",
     source_genome_build = "GRCh38", license = "test-fixture",

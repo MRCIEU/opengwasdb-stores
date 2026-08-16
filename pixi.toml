@@ -36,15 +36,23 @@ threadpoolctl = ">=3.0"
 # environment) if pysam is also pinned via conda, so it is left for pip/uv to
 # resolve as a transitive PyPI dependency of opengwasdb itself.
 #
-# Bumped for issue #51: explodecomputer/opengwasdb#16 ("Add analyses.tsv
-# schema module") published opengwasdb.model.analyses (validate_analyses(),
-# to_json_schema()) -- the shared core schema this registry's checks.schema
-# validates emitted manifests against, replacing this repository's
-# hand-rolled per-generator column-name checks. This pin is opengwasdb's
-# main HEAD at the time of the bump, which also carries #17-#19's
-# manifest-authority/reader-capability/SD-estimator work (ADR-0012-owned
-# statistical logic) issue #15's breakdown depends on.
-opengwasdb = { git = "https://github.com/explodecomputer/opengwasdb", rev = "197a77c499b013cf9c45c6b920715bca740f5a4e" }
+# Bumped for issue #63/opengwasdb#74: explodecomputer/opengwasdb#64 ("Unify
+# analyses.tsv across every layout; retire phenotype_id; add Attribution
+# Metadata", ADR 0034) landed as opengwasdb#75-#78. This pin is opengwasdb's
+# main HEAD at the time of the bump. Note opengwasdb.model.analyses's
+# registry-facing validate_analyses()/classify_column()/SHARED_CORE_COLUMNS
+# still describe the pre-ADR-0034 schema at this rev -- that registry-side
+# migration is explicitly deferred upstream (see the module's own docstring)
+# -- so this bump does not change checks.schema's pass/fail behaviour; it
+# only picks up ADR 0034's Analysis model/writer/reader and Dense/Ragged
+# builder migration for whoever imports opengwasdb directly.
+#
+# Previously bumped for issue #51: explodecomputer/opengwasdb#16 ("Add
+# analyses.tsv schema module") published opengwasdb.model.analyses
+# (validate_analyses(), to_json_schema()) -- the shared core schema this
+# registry's checks.schema validates emitted manifests against, replacing
+# this repository's hand-rolled per-generator column-name checks.
+opengwasdb = { git = "https://github.com/explodecomputer/opengwasdb", rev = "f0e4bf74e3ca0d4c0fb88ff554d631bfda9f0f5b" }
 
 [feature.r.dependencies]
 r-base = ">=4.3"

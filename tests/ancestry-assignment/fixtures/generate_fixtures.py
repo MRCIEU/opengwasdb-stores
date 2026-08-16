@@ -74,7 +74,7 @@ def write_ssf(filename: str, rows: list[dict[str, str]]) -> None:
 def base_analysis_row(analysis_id: str, source_ancestry_label: str, filtered_file: str) -> dict[str, str]:
     return {
         "analysis_index": "0", "analysis_id": analysis_id, "source_analysis_id": analysis_id,
-        "source_label": f"Fixture analysis {analysis_id}", "trait_ontology_name": "", "trait_ontology_id": "",
+        "source_label": f"Fixture analysis {analysis_id}", "trait_ontology_label": "", "trait_ontology_id": "",
         "source_file": f"filtered/{filtered_file}", "filtered_file": filtered_file,
         "source_bundle_id": "", "checksum": "", "checksum_algorithm": "sha256", "size_bytes": "",
         "source_genome_build": "GRCh38", "license": "test-fixture",

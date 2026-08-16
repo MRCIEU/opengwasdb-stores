@@ -132,12 +132,32 @@ misrepresenting that total as a case count. Any other shape is explicit
 
 | Class | Owner | Where used | Examples |
 |---|---|---|---|
-| Shared core | OpenGWASDB | Release manifests and built stores. These columns carry interpretation-bearing Analysis metadata. | `analysis_id`, `source_label`, ontology fields, ancestry fields, effect-scale fields, sample-size fields. |
-| Registry-only | Store registry | Release manifests only. These columns locate source inputs, record provenance, or explain inclusion. | `source_analysis_id`, `source_file`, `source_bundle_id`, `checksum`, `checksum_algorithm`, `size_bytes`, `license`, publication metadata, `analysis_group_id`, `inclusion_reason`, `exclude_from_build`. |
+| Shared core | OpenGWASDB | Release manifests and built stores. These columns carry interpretation-bearing Analysis metadata. | `analysis_id`, `analysis_label`, ontology fields, ancestry fields, effect-scale fields, sample-size fields, Attribution Metadata (`license`, `publication_doi`, `publication_pmid`, `consortium`, `first_author`). |
+| Registry-only | Store registry | Release manifests only. These columns locate source inputs, record provenance, or explain inclusion. | `source_analysis_id`, `source_label`, `source_file`, `source_bundle_id`, `checksum`, `checksum_algorithm`, `size_bytes`, `analysis_group_id`, `inclusion_reason`, `exclude_from_build`. |
 | Store-only | OpenGWASDB | Built stores only. These columns are produced during or after the build and therefore do not appear in accepted release manifests. | `completed_against`, reference-completion quality rollups, store artifact diagnostics. |
 
 Builders may ignore registry-only columns after using them to locate inputs.
 Store-only columns must not be required before the build has run.
+
+opengwasdb's [ADR 0034](https://github.com/explodecomputer/opengwasdb/blob/main/docs/adr/0034-unify-analysestsv-across-layouts-retire-phenotype-id.md)
+("Unify `analyses.tsv` across layouts, retire `phenotype_id`, add Attribution
+Metadata", [opengwasdb#64](https://github.com/explodecomputer/opengwasdb/issues/64))
+promoted `trait_ontology_id`/`trait_ontology_label` (renamed from
+`trait_ontology_name`) and Attribution Metadata (`license`, `publication_doi`,
+`publication_pmid`, `consortium`, and the new `first_author`) from
+registry-only to shared core, so a built store carries them without needing
+the registry — this repository never hand-maintains that classification (see
+"Metadata resolvers" and `resources/lib/schema_validate.py`/`.R`), so the
+promotion took effect automatically once opengwasdb shipped it; only this
+document's classification and the generators' emitted column names needed a
+matching update, tracked as
+[opengwasdb-stores#63](https://github.com/MRCIEU/opengwasdb-stores/issues/63)
+/ [opengwasdb#74](https://github.com/explodecomputer/opengwasdb/issues/74).
+ADR 0034 is a pre-release breaking format reset, not an additive change: it
+also retired `phenotype_id`/`phenotype_label` (never used by this registry)
+and Ragged's SQLite-only `trait_id` lookup key (opengwasdb's own concept, not
+this registry's family-specific `trait_id` extra column below, which is
+unrelated and unaffected).
 
 ## `release.yaml`
 
@@ -193,6 +213,21 @@ such target (for example small-molecule metabolomics, issue #26) omits these
 columns entirely rather than filling them with placeholder or `NA` values —
 their absence is how a reviewer tells the two family shapes apart.
 
+ADR 0034 also promoted `gene_id`/`gene_name`/`trait_chr`/`trait_bp` (plus
+`tissue`/`context`, which this registry already emits unconditionally) into
+opengwasdb's shared "Analysis" model for *built stores*, since they are no
+longer Ragged-specific there. This registry still only emits them for
+gene-target families, per the paragraph above — opengwasdb's builder treats a
+missing column the same as a blank value, so no-target families build
+correctly either way, and this registry's family-shape convention (absence,
+not blank, distinguishes the two shapes) is an unrelated, still-deliberate
+choice. `trait_id`, `n`, `mhc`, `target_resolution_method`, and
+`n_target_rows` remain genuinely registry/family-specific with no shared-core
+equivalent — including this generator's own `trait_id` (a proteomics
+analyte-level identifier from its gene-target sidecar), which is unrelated to
+Ragged's now-retired SQLite `trait_id` lookup key that ADR 0034 removed from
+opengwasdb itself.
+
 Accepted build rows must have usable sample-size metadata. Analyses with unknown
 sample size may appear in Source Inventories, candidate diagnostics, or review
 sidecars, but should not be included as buildable rows in an accepted
@@ -207,19 +242,21 @@ the source.
 |---|---:|---|
 | `analysis_id` | Yes | Stable registry Analysis ID. Usually source-derived unless the source lacks stable IDs. |
 | `source_analysis_id` | Optional | Upstream analysis identifier, such as a GCST accession or OpenGWAS ID, when the Source Collection provides one. |
-| `source_label` | Yes | Upstream trait or phenotype label preserved as source provenance. |
-| `trait_ontology_name` | Optional | Ontology or controlled vocabulary that defines `trait_ontology_id`, such as EFO, MONDO, OBA, or a source-local analyte vocabulary. |
-| `trait_ontology_id` | Optional | Ontology or controlled-vocabulary identifier for the analysed trait, when available. |
+| `source_label` | Yes | Upstream trait or phenotype label preserved as source provenance. Registry-only; kept separate from `analysis_label` even when both hold the same source text, since `source_label` is not carried into a built store. |
+| `analysis_label` | Yes | Free-text, non-unique display label for the Analysis, carried into the built store (shared core, ADR 0034). Typically the same source text as `source_label` when the Source Collection has no separate curated display name. |
+| `trait_ontology_label` | Optional | Ontology or controlled vocabulary that defines `trait_ontology_id`, such as EFO, MONDO, OBA, or a source-local analyte vocabulary. Named `trait_ontology_name` before ADR 0034. |
+| `trait_ontology_id` | Optional | Ontology or controlled-vocabulary identifier for the analysed trait, when available. CURIE format, for example `EFO:0001073`; blank when unmapped. Not required to be unique — several Analyses may legitimately share one. |
 | `source_file` | Yes | Source file or filtered source file consumed by the builder. |
 | `source_bundle_id` | Optional | Identifier for a multi-file Source Bundle when one file is insufficient. |
 | `checksum` | Yes | Checksum for `source_file` or source bundle manifest. |
 | `checksum_algorithm` | Yes | Algorithm used for `checksum`, for example `sha256`. |
 | `size_bytes` | Optional | File size in bytes. |
 | `source_genome_build` | Yes | Genome build of source coordinates for this Analysis. |
-| `license` | Yes | Licence or usage terms after applying source defaults and row overrides. |
-| `publication_doi` | Optional | DOI for compact bibliographic provenance. |
-| `publication_pmid` | Optional | PMID for compact bibliographic provenance. |
-| `consortium` | Optional | Consortium or provider label when DOI/PMID is not enough for provenance. |
+| `license` | Yes | Licence or usage terms after applying source defaults and row overrides. Attribution Metadata (shared core, ADR 0034): carried into the built store, since a store that cannot be legally used or cited has failed self-containment even when its statistics are perfectly interpretable. |
+| `publication_doi` | Optional | DOI for compact bibliographic provenance. Attribution Metadata (shared core, ADR 0034). |
+| `publication_pmid` | Optional | PMID for compact bibliographic provenance. Attribution Metadata (shared core, ADR 0034). |
+| `consortium` | Optional | Consortium or provider label when DOI/PMID is not enough for provenance. Attribution Metadata (shared core, ADR 0034). |
+| `first_author` | Optional | First author for compact bibliographic/attribution provenance. Attribution Metadata (shared core, ADR 0034); new column, no equivalent before it. |
 | `source_ancestry_label` | Optional | Upstream ancestry/population label. |
 | `assigned_ancestry` | Optional | Registry-normalised ancestry used for store inclusion and routing. Empty means unassigned. |
 | `ancestry_assignment_method` | Yes | Controlled value: `af_assigned`, `source_fallback`, `source_trusted_no_af`, or `unassigned`. |
