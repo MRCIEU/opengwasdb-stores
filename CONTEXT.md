@@ -86,7 +86,7 @@ An auxiliary build-time resource such as an LD reference panel or genome referen
 _Avoid_: source collection, store family
 
 **Store Layout**:
-The storage organisation used for a Store Release, such as dense observed-only, dense reference-completed, ragged observed-only, or ragged reference-completed.
+The storage organisation used for a Store Release, such as dense observed-only, dense reference-completed, ragged observed-only, ragged reference-completed, or hybrid.
 _Avoid_: store family, source format
 
 **Store Release**:
