@@ -126,8 +126,24 @@ The trait label supplied by the upstream Source Collection and preserved in the 
 _Avoid_: curated trait label, analysis label
 
 **Analytical Metadata**:
-Metadata that affects the interpretation of association statistics in a Store Release, such as sample size, ancestry, genome build, units, case-control counts, allele conventions, and harmonisation assumptions.
+Metadata that affects the interpretation of association statistics in a Store Release, such as sample size, ancestry, genome build, units, case-control counts, allele conventions, harmonisation assumptions, and Trait Ontology Mapping.
 _Avoid_: trait annotation, display metadata
+
+**Trait Ontology Mapping**:
+The association between an Analysis's Trait and a controlled-vocabulary identifier appropriate to that Trait's kind — an EFO or MONDO term for phenotype-centric Traits, an Ensembl gene ID for gene-centric Traits — resolved before build and frozen into the Release Manifest as Analytical Metadata. Source-provided when the Source Collection already supplies one; otherwise resolved against a Canonical Trait Mapping Table, or left unmapped. A wrong mapping is corrected the same way any other Analytical Metadata error is: via a Release Erratum, not a silent edit.
+_Avoid_: trait annotation, ontology term
+
+**Analysis Label**:
+The human-interpretable display name for an Analysis's subject, drawn from whichever identity concept is native to the Store Family — a trait name for phenotype-centric Analyses, a gene symbol for gene-centric Analyses.
+_Avoid_: trait label, display name
+
+**Trait Ontology Mapping Method**:
+The controlled value describing how a Trait Ontology Mapping was produced, such as source-provided, canonical-table lookup, or unmapped.
+_Avoid_: mapping confidence, mapping status
+
+**Canonical Trait Mapping Table**:
+A curated, versioned Reference Resource that maps phenotype trait labels to ontology terms such as EFO or MONDO, produced by a candidate-generation-and-review process outside any single Manifest Generator, and consulted by generators as a deterministic, offline, build-time lookup rather than a live external call. Gene-centric Trait Ontology Mapping does not use this table: it resolves against an external gene authority (Ensembl/HGNC) by direct deterministic join, since gene symbol to Ensembl ID carries no comparable semantic ambiguity.
+_Avoid_: ontology snapshot, mapping service
 
 **Effect Scale**:
 The OpenGWASDB controlled vocabulary value describing the scale of stored effects for an Analysis, such as `sd`, `log_or`, or `log_hazard`.

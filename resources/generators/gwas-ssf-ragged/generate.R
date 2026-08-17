@@ -280,7 +280,7 @@ summarise_targets <- function(targets, selected_ids, fail_unresolved = TRUE) {
   ), by = source_analysis_id]
 }
 
-manifest_rows <- function(cfg, selected, target_summary, paths, has_targets = TRUE) {
+manifest_rows <- function(cfg, selected, target_summary, paths, has_targets = TRUE, canonical_table = NULL) {
   x <- merge(
     selected,
     target_summary,
@@ -319,6 +319,22 @@ manifest_rows <- function(cfg, selected, target_summary, paths, has_targets = TR
   x[, size_bytes := ""]
   x[, tissue := cfg$defaults$tissue %||% ""]
   x[, context := cfg$defaults$context %||% ""]
+  x[, trait_ontology_id_curie := obo_uri_to_curie(MAPPED_TRAIT_URI)]
+
+  # Trait Ontology Mapping (CONTEXT.md): GWAS Catalog supplies MAPPED_TRAIT/
+  # MAPPED_TRAIT_URI for every currently-built bundle here, so this resolves
+  # as source_provided today; the canonical_table fallback exists for a
+  # future GWAS Catalog study with no mapping, not a case this repo's real
+  # data currently exercises.
+  ontology_resolved <- resolve_trait_ontology_mappings(
+    trait_labels = x$DISEASE.TRAIT,
+    source_ontology_ids = x$trait_ontology_id_curie,
+    source_ontology_labels = x$MAPPED_TRAIT,
+    canonical_table = canonical_table
+  )
+  x[, trait_ontology_id := ontology_resolved$trait_ontology_id]
+  x[, trait_ontology_label := ontology_resolved$trait_ontology_label]
+  x[, trait_ontology_mapping_method := ontology_resolved$trait_ontology_mapping_method]
   if (has_targets) x[, n := sample_size]
 
   # Single-gene-target columns (trait_id, gene_id/name, cis coordinates, MHC
@@ -336,8 +352,9 @@ manifest_rows <- function(cfg, selected, target_summary, paths, has_targets = TR
     "source_analysis_id" = "STUDY.ACCESSION",
     "source_label" = "DISEASE.TRAIT",
     "analysis_label" = "DISEASE.TRAIT",
-    "trait_ontology_label" = "MAPPED_TRAIT",
-    "trait_ontology_id" = "MAPPED_TRAIT_URI",
+    "trait_ontology_label",
+    "trait_ontology_id",
+    "trait_ontology_mapping_method",
     target_cols_after_trait_ontology,
     "source_file",
     "source_url",
@@ -501,7 +518,8 @@ emit_bundle <- function(cfg, root) {
     empty_target_summary()
   }
   paths <- artifact_paths(cfg, root)
-  analyses <- manifest_rows(cfg, selected, target_summary, paths, has_targets = has_targets)
+  canonical_table <- load_canonical_trait_table_from_cfg(cfg$reference_resources, root)
+  analyses <- manifest_rows(cfg, selected, target_summary, paths, has_targets = has_targets, canonical_table = canonical_table)
 
   release_dir <- path_abs(root, cfg$output$release_dir)
   sidecar_dir <- file.path(release_dir, "sidecars")
@@ -1025,7 +1043,8 @@ validate_emit <- function(cfg, root) {
   # hand-rolled, driftable copy of the same list.
   required <- c(
     "analysis_index", "analysis_id", "source_analysis_id", "source_label",
-    "analysis_label", "trait_ontology_label", "trait_ontology_id", "source_file",
+    "analysis_label", "trait_ontology_label", "trait_ontology_id",
+    "trait_ontology_mapping_method", "source_file",
     "source_genome_build", "license", "first_author", "filtered_file"
   )
   # trait_id/gene_id/gene_name/trait_chr/trait_bp/n/mhc are single-gene-target
@@ -1143,6 +1162,8 @@ root <- repo_root()
 source(path_abs(root, "resources/lib/effect_scale_validation.R"))
 source(path_abs(root, "resources/lib/build_environment.R"))
 source(path_abs(root, "resources/lib/schema_validate.R"))
+source(path_abs(root, "resources/lib/metadata_resolvers/ontology_contract.R"))
+source(path_abs(root, "resources/lib/metadata_resolvers/canonical_trait_table.R"))
 cfg <- read_yaml(path_abs(root, args$config))
 cfg$.config_path <- args$config
 

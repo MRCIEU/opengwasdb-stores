@@ -8,6 +8,7 @@
 # module (see resources/lib/effect_scale_validation.R).
 
 suppressPackageStartupMessages(library(data.table))
+source("resources/lib/metadata_resolvers/canonical_trait_table.R")
 
 select_analyses <- function(candidates, max_analyses = NA_integer_, only_analysis_id = "") {
   selected <- candidates
@@ -107,4 +108,28 @@ apply_resolution <- function(candidates, resolution) {
   analyses <- merged[, !c("resolved_status", "resolved_notes", "resolved_scale", "resolved_kind",
                            "resolved_n", "resolved_ncase", "resolved_ncontrol"), with = FALSE]
   list(analyses = analyses, derivations = derivations)
+}
+
+# Applies Trait Ontology Mapping (CONTEXT.md) onto a candidate/analyses table
+# already carrying source_label/trait_ontology_id/trait_ontology_label
+# columns. Kept separate from apply_resolution() above since it resolves an
+# unrelated field group -- see
+# resources/lib/metadata_resolvers/canonical_trait_table.R's
+# resolve_trait_ontology_mapping() contract: source_provided when the Source
+# Collection already supplies an ontology ID, canonical_table_lookup when a
+# Canonical Trait Mapping Table match exists, otherwise explicit unmapped
+# (opengwas-gwas-vcf-dense supplies no ontology mapping of its own today, so
+# every row currently resolves to one of the latter two).
+apply_trait_ontology_mapping <- function(analyses, canonical_table = NULL) {
+  resolved <- resolve_trait_ontology_mappings(
+    trait_labels = analyses$source_label,
+    source_ontology_ids = analyses$trait_ontology_id,
+    source_ontology_labels = analyses$trait_ontology_label,
+    canonical_table = canonical_table
+  )
+  analyses <- copy(analyses)
+  analyses[, trait_ontology_id := resolved$trait_ontology_id]
+  analyses[, trait_ontology_label := resolved$trait_ontology_label]
+  analyses[, trait_ontology_mapping_method := resolved$trait_ontology_mapping_method]
+  analyses
 }
