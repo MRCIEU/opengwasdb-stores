@@ -280,6 +280,13 @@ def merge_validation_yaml(
     )
 
 
+def read_tsv(path: Path) -> list[dict[str, str]]:
+    import csv
+
+    with path.open(newline="", encoding="utf-8") as fh:
+        return list(csv.DictReader(fh, delimiter="\t"))
+
+
 def repo_root(start: Path) -> Path:
     import subprocess
 

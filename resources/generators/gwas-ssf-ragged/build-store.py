@@ -7,6 +7,7 @@ import argparse
 import csv
 import gzip
 import json
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -15,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from resources.lib.release_yaml import (  # noqa: E402
     merge_validation_yaml,
     read_release_yaml,
+    read_tsv,
     repo_root,
     require_text,
     resolve_path,
@@ -23,7 +25,34 @@ from resources.lib.release_yaml import (  # noqa: E402
 from opengwasdb.layouts.ragged.build_ssf import build_ragged_from_ssf
 from opengwasdb.layouts.ragged.zarr_csr import RaggedCSRReader
 from opengwasdb.model.manifest import StoreManifest
-from opengwasdb.traits.axis import TraitsAxisReader
+
+
+def read_store_analyses(store_dir: Path) -> dict[str, dict[str, str]]:
+    """Read a built ragged store's own analyses.tsv (ADR 0034, opengwasdb#69:
+    no separate Trait axis reader exists any more -- analyses.tsv at the
+    store root is the sole record), keyed by analysis_id."""
+    with (store_dir / "analyses.tsv").open(newline="", encoding="utf-8") as fh:
+        return {row["analysis_id"]: row for row in csv.DictReader(fh, delimiter="\t")}
+
+
+def shared_core_passthrough_warnings(
+    manifest_rows: list[dict[str, str]], store_analyses: dict[str, dict[str, str]]
+) -> list[str]:
+    """Confirm shared-core columns the registry manifest actually populated
+    (analysis_label, trait_ontology_id/label) made it into the built store's
+    own analyses.tsv, rather than trusting that a successful build implies a
+    complete one -- opengwasdb#83 found opengwasdb.layouts.ragged.build_ssf
+    silently drops these (and several pre-ADR-0034 fields) with no error."""
+    warnings = []
+    for row in manifest_rows:
+        store_row = store_analyses.get(row["analysis_id"], {})
+        for column in ("analysis_label", "trait_ontology_id", "trait_ontology_label"):
+            if row.get(column) and not store_row.get(column):
+                warnings.append(
+                    f"{row['analysis_id']}: {column} present in the manifest but missing from the "
+                    "built store's analyses.tsv (see opengwasdb#83)"
+                )
+    return warnings
 
 
 def parse_args() -> argparse.Namespace:
@@ -55,11 +84,6 @@ def first_complete_manifest_rows(path: Path) -> list[dict[str, str]]:
             f"{path} still has {len(missing)} rows without filtered-file checksums: {preview}"
         )
     return rows
-
-
-def read_tsv(path: Path) -> list[dict[str, str]]:
-    with path.open(newline="", encoding="utf-8") as fh:
-        return list(csv.DictReader(fh, delimiter="\t"))
 
 
 def associations_in_region(
@@ -206,8 +230,9 @@ def main() -> None:
         if args.store_dir
         else resolve_path(root, require_text(build, "artifacts", "store_uri"))
     )
-    scale_map = {"sd": "sd_units", "log_or": "log_or", "log_hazard": "log_hazard"}
-    stored_effect_scale = scale_map.get(require_text(build, "effects", "stored_effect_scale") or "sd", "sd_units")
+    # opengwasdb's StoredEffectScale enum now uses this registry's own
+    # vocabulary directly (sd/log_or/log_hazard) -- no translation needed.
+    stored_effect_scale = require_text(build, "effects", "stored_effect_scale") or "sd"
 
     build_started = time.perf_counter()
     result = build_ragged_from_ssf(
@@ -224,9 +249,7 @@ def main() -> None:
     manifest = StoreManifest.load(store_dir)
     reader = RaggedCSRReader(store_dir)
     variants = variant_lookup(store_dir)
-    with TraitsAxisReader(store_dir) as traits:
-        trait_rows = sorted(list(traits.all()), key=lambda t: t.analysis_index)
-    trait_by_id = {row.analysis_id: row for row in trait_rows}
+    trait_by_id = read_store_analyses(store_dir)
     regions = read_tsv(release_dir / "sidecars" / "sparse_regions.tsv")
     filter_summary = read_tsv(release_dir / "sidecars" / "filter_summary.tsv")
 
@@ -242,7 +265,7 @@ def main() -> None:
     cis_query = associations_in_region(
         reader,
         variants,
-        cis_trait.analysis_index,
+        int(cis_trait["analysis_index"]),
         cis_region["chromosome"],
         int(cis_region["start"]),
         int(cis_region["end"]),
@@ -250,7 +273,7 @@ def main() -> None:
     trans_query = associations_in_region(
         reader,
         variants,
-        trans_trait.analysis_index,
+        int(trans_trait["analysis_index"]),
         trans_region["chromosome"],
         int(trans_region["start"]),
         int(trans_region["end"]),
@@ -258,7 +281,7 @@ def main() -> None:
     cis_expected = int(cis_region.get("n_variants_retained") or 0)
     trans_expected = int(trans_region.get("n_variants_retained") or 0)
     expected_associations = sum(int(row["retained_rows"]) for row in filter_summary if row.get("status") == "ok")
-    warnings = []
+    warnings = shared_core_passthrough_warnings(rows, trait_by_id)
     if cis_query["observed"] != cis_expected:
         warnings.append(f"cis query observed {cis_query['observed']} associations but sidecar records {cis_expected}")
     if trans_query["observed"] != trans_expected:
