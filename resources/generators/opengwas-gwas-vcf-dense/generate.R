@@ -131,6 +131,11 @@ emit_bundle <- function(cfg, root, max_analyses = NA_integer_, only_analysis_id 
   applied <- apply_resolution(selected, resolution)
   analyses <- applied$analyses
 
+  # analysis_label (ADR 0034, shared core): this Source Collection has no
+  # separate curated display name from source_label, so mirror it directly
+  # -- same convention gwas-ssf-ragged uses (docs/release-metadata-schema.md).
+  analyses[, analysis_label := source_label]
+
   release_dir <- path_abs(root, cfg$output$release_dir)
   sidecar_dir <- file.path(release_dir, "sidecars")
   dir.create(sidecar_dir, recursive = TRUE, showWarnings = FALSE)
@@ -216,7 +221,7 @@ validate_emit <- function(cfg, root) {
   analyses <- fread(file.path(release_dir, "analyses.tsv"), sep = "\t", na.strings = "",
                      colClasses = list(character = "exclude_from_build"))
   required <- c(
-    "analysis_id", "source_analysis_id", "source_label", "source_file",
+    "analysis_id", "source_analysis_id", "source_label", "analysis_label", "source_file",
     "source_genome_build", "stored_effect_scale", "sample_size_kind",
     "sample_size_scope", "sample_size", "n_cases", "n_controls", "exclude_from_build"
   )

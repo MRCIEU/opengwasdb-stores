@@ -335,7 +335,8 @@ manifest_rows <- function(cfg, selected, target_summary, paths, has_targets = TR
     "analysis_id" = "STUDY.ACCESSION",
     "source_analysis_id" = "STUDY.ACCESSION",
     "source_label" = "DISEASE.TRAIT",
-    "trait_ontology_name" = "MAPPED_TRAIT",
+    "analysis_label" = "DISEASE.TRAIT",
+    "trait_ontology_label" = "MAPPED_TRAIT",
     "trait_ontology_id" = "MAPPED_TRAIT_URI",
     target_cols_after_trait_ontology,
     "source_file",
@@ -350,6 +351,7 @@ manifest_rows <- function(cfg, selected, target_summary, paths, has_targets = TR
     "publication_doi",
     "publication_pmid",
     "consortium",
+    "first_author" = "FIRST.AUTHOR",
     "source_ancestry_label",
     "assigned_ancestry",
     "ancestry_assignment_method",
@@ -1023,8 +1025,8 @@ validate_emit <- function(cfg, root) {
   # hand-rolled, driftable copy of the same list.
   required <- c(
     "analysis_index", "analysis_id", "source_analysis_id", "source_label",
-    "trait_ontology_name", "trait_ontology_id", "source_file",
-    "source_genome_build", "license", "filtered_file"
+    "analysis_label", "trait_ontology_label", "trait_ontology_id", "source_file",
+    "source_genome_build", "license", "first_author", "filtered_file"
   )
   # trait_id/gene_id/gene_name/trait_chr/trait_bp/n/mhc are single-gene-target
   # columns (issue #26): required only for Store Families with a resolvable
