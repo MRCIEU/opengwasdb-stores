@@ -71,22 +71,6 @@ artifact_paths <- function(cfg, root) {
 
 clean_chr <- function(x) sub("^chr", "", as.character(x), ignore.case = TRUE)
 
-bucket_of <- function(gcst) {
-  accession_digits <- sub("^GCST", "", gcst)
-  n <- as.numeric(accession_digits)
-  lo <- floor((n - 1) / 1000) * 1000 + 1
-  width <- nchar(accession_digits)
-  sprintf(
-    "GCST%s-GCST%s",
-    sprintf(paste0("%0", width, "d"), lo),
-    sprintf(paste0("%0", width, "d"), lo + 999)
-  )
-}
-
-ssf_url <- function(gcst, ftp_base) {
-  sprintf("%s/%s/%s/harmonised/%s.h.tsv.gz", ftp_base, bucket_of(gcst), gcst, gcst)
-}
-
 slugify <- function(x) {
   x <- gsub("[^A-Za-z0-9]+", "-", x)
   x <- gsub("(^-+|-+$)", "", x)
@@ -1159,6 +1143,7 @@ refresh_build_mode <- function(cfg, root) {
 
 args <- parse_args(commandArgs(trailingOnly = TRUE))
 root <- repo_root()
+source(path_abs(root, "resources/lib/gwas_catalog_ssf_url.R"))
 source(path_abs(root, "resources/lib/effect_scale_validation.R"))
 source(path_abs(root, "resources/lib/build_environment.R"))
 source(path_abs(root, "resources/lib/schema_validate.R"))
