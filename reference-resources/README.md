@@ -10,5 +10,6 @@ Each subdirectory records one Reference Resource declaration (`resource.yaml`): 
 - `gpm-hg38-eur-ld/` - UKB hg38 EUR LD reference panel, used for reference completion of EUR-assigned Analyses. Declares the same physical directory as `ukb-hg38-eur-af`, but for its LD content rather than its allele frequencies.
 - `hgdp1kgp-hg38-ld/` - available HGDP+1kGP LD reference panels for AFR, EAS and SAS. Built from a different, much smaller cohort than the EUR panel; see ADR 0020 for why, and for the resulting permanent difference in completion quality across ancestries.
 - `hgdp1kgp-hg38-eur-calibration/` - available matched, non-production EUR calibration control; its quantitative comparison with the UKB EUR panel gates release of the production panels.
+- `canonical-trait-mapping-efo/` - a curated `trait_label` -> `trait_ontology_id`/`trait_ontology_label` exact-match lookup, consulted by Manifest Generators when a Source Collection doesn't supply its own trait ontology mapping (issue: Trait Ontology Mapping). Tracked directly in this repository, like `qc-panel-hg38`; starts empty pending real curated rows.
 
 Generation and maintenance tooling for LD panels lives in `resources/scripts/ld-panel/`.

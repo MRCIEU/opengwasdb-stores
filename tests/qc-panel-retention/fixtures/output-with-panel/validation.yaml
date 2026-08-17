@@ -1,10 +1,10 @@
-status: not_run
-validated_at: ~
+status: passed
+validated_at: '2026-08-17T08:28:04Z'
 validator:
   name: resources/generators/gwas-ssf-ragged/generate.R
   version: ~
 checks:
-  schema: not_run
+  schema: passed
   files: not_run
   reader_smoke_test: not_run
   ancestry: not_run

@@ -58,6 +58,9 @@ reference_resources:
     genome_build: GRCh38
     root: /data/opengwasdb/reference/ukb-hg38
     ancestry_dir: EUR
+  - resource_id: canonical-trait-mapping-efo
+    kind: trait_ontology_mapping
+    location: reference-resources/canonical-trait-mapping-efo/mapping.tsv
 
 ancestry_assignment:
   enabled: true

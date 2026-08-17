@@ -30,6 +30,8 @@
 
 suppressPackageStartupMessages(library(data.table))
 
+source("resources/lib/metadata_resolvers/ontology_contract.R")
+source("resources/lib/metadata_resolvers/canonical_trait_table.R")
 source("resources/lib/opengwas_gwas_vcf_dense.R")
 
 fail <- function(...) stop(sprintf(...), call. = FALSE)
@@ -44,6 +46,7 @@ base_candidate_row <- function(analysis_id) {
     analysis_id = analysis_id, source_analysis_id = analysis_id,
     source_label = paste("Fixture", analysis_id), source_file = paste0("/fixture/", analysis_id, ".vcf.gz"),
     source_genome_build = "GRCh37", license = NA_character_,
+    trait_ontology_id = NA_character_, trait_ontology_label = NA_character_,
     stored_effect_scale = NA_character_, original_effect_scale = NA_character_, original_sd_method = NA_character_,
     sample_size_kind = "total", sample_size_scope = "analysis_level", sample_size = 999999L,
     n_cases = NA_real_, n_controls = NA_real_,
@@ -203,5 +206,31 @@ check(grepl("schema: failed", paste(readLines(file.path(schema_tmp, "validation.
 missing_shared <- copy(valid_schema_row)[, original_effect_scale := NULL]
 fwrite(missing_shared, file.path(schema_tmp, "analyses.tsv"), sep = "\t", na = "")
 check(run_dense_validate() != 0L, "dense schema: missing shared required column should fail")
+
+# --- apply_trait_ontology_mapping(): opengwas-gwas-vcf-dense supplies no
+# ontology mapping of its own -- with no canonical table declared, every row
+# resolves to an explicit unmapped, never a silently blank/absent column
+# (issue: opengwasdb-stores#63 gap analysis).
+candidates <- base_candidate_row("fixt-ontology-unmapped")
+mapped <- apply_trait_ontology_mapping(candidates, canonical_table = NULL)
+row <- mapped[analysis_id == "fixt-ontology-unmapped"]
+check(row$trait_ontology_mapping_method == "unmapped" && is.na(row$trait_ontology_id),
+      "ontology mapping: no source ID and no table declared should resolve to unmapped, got %s",
+      row$trait_ontology_mapping_method)
+
+# A Canonical Trait Mapping Table match resolves the row instead.
+fixture_table_path <- tempfile(fileext = ".tsv")
+writeLines(c(
+  "trait_label\ttrait_ontology_id\ttrait_ontology_label",
+  "Fixture fixt-ontology-matched\tEFO:9999001\tFixture ontology label"
+), fixture_table_path)
+canonical_table <- load_canonical_trait_table(fixture_table_path)
+candidates <- base_candidate_row("fixt-ontology-matched")
+mapped <- apply_trait_ontology_mapping(candidates, canonical_table = canonical_table)
+row <- mapped[analysis_id == "fixt-ontology-matched"]
+check(row$trait_ontology_mapping_method == "canonical_table_lookup" && row$trait_ontology_id == "EFO:9999001",
+      "ontology mapping: a canonical-table match should resolve via lookup, got method=%s id=%s",
+      row$trait_ontology_mapping_method, row$trait_ontology_id)
+unlink(fixture_table_path)
 
 cat(sprintf("ALL %d CHECKS PASSED\n", n_checks))

@@ -136,6 +136,14 @@ emit_bundle <- function(cfg, root, max_analyses = NA_integer_, only_analysis_id 
   # -- same convention gwas-ssf-ragged uses (docs/release-metadata-schema.md).
   analyses[, analysis_label := source_label]
 
+  # Trait Ontology Mapping (CONTEXT.md): this Source Collection supplies no
+  # trait ontology mapping of its own (issue: opengwasdb-stores#63 gap
+  # analysis), so every row falls through to the Canonical Trait Mapping
+  # Table when declared, or explicit `unmapped` otherwise -- never silently
+  # blank with no record of why.
+  canonical_table <- load_canonical_trait_table_from_cfg(cfg$reference_resources, root)
+  analyses <- apply_trait_ontology_mapping(analyses, canonical_table)
+
   release_dir <- path_abs(root, cfg$output$release_dir)
   sidecar_dir <- file.path(release_dir, "sidecars")
   dir.create(sidecar_dir, recursive = TRUE, showWarnings = FALSE)
@@ -222,7 +230,8 @@ validate_emit <- function(cfg, root) {
                      colClasses = list(character = "exclude_from_build"))
   required <- c(
     "analysis_id", "source_analysis_id", "source_label", "analysis_label", "source_file",
-    "source_genome_build", "stored_effect_scale", "sample_size_kind",
+    "source_genome_build", "trait_ontology_mapping_method",
+    "stored_effect_scale", "sample_size_kind",
     "sample_size_scope", "sample_size", "n_cases", "n_controls", "exclude_from_build"
   )
   missing_cols <- setdiff(required, names(analyses))
@@ -270,6 +279,8 @@ validate_emit <- function(cfg, root) {
 args <- parse_args(commandArgs(trailingOnly = TRUE))
 root <- repo_root()
 source(path_abs(root, "resources/lib/metadata_resolvers/opengwas_api.R"))
+source(path_abs(root, "resources/lib/metadata_resolvers/ontology_contract.R"))
+source(path_abs(root, "resources/lib/metadata_resolvers/canonical_trait_table.R"))
 source(path_abs(root, "resources/lib/build_environment.R"))
 source(path_abs(root, "resources/lib/opengwas_gwas_vcf_dense.R"))
 source(path_abs(root, "resources/lib/schema_validate.R"))

@@ -49,6 +49,7 @@ def main() -> None:
 
         columns = [
             "analysis_id", "source_analysis_id", "source_label", "trait_ontology_label", "trait_ontology_id",
+            "trait_ontology_mapping_method",
             "source_file", "source_genome_build", "source_ancestry_label", "assigned_ancestry",
             "ancestry_assignment_method", "original_effect_scale", "original_sd", "original_sd_method",
             "stored_effect_scale", "sample_size_kind", "sample_size_scope", "sample_size", "n_cases", "n_controls",
@@ -56,7 +57,8 @@ def main() -> None:
         ]
         row = {
             "analysis_id": "FIXT_DENSE", "source_analysis_id": "FIXT_DENSE", "source_label": "Dense fixture",
-            "trait_ontology_label": "", "trait_ontology_id": "", "source_file": str(source),
+            "trait_ontology_label": "", "trait_ontology_id": "", "trait_ontology_mapping_method": "unmapped",
+            "source_file": str(source),
             "source_genome_build": "GRCh38", "source_ancestry_label": "European", "assigned_ancestry": "",
             "ancestry_assignment_method": "unassigned", "original_effect_scale": "native", "original_sd": "",
             "original_sd_method": "unavailable", "stored_effect_scale": "sd", "sample_size_kind": "total",
@@ -107,7 +109,8 @@ effect_scale_validation:
         assert sd["status"] == "passed" and sd["estimator_version"].startswith("opengwasdb:")
         validation = (release / "validation.yaml").read_text(encoding="utf-8")
         assert "ancestry: passed" in validation and "effect_scale: passed" in validation
-    print("ALL 8 CHECKS PASSED")
+        assert analysis["trait_ontology_mapping_method"] == "unmapped"
+    print("ALL 9 CHECKS PASSED")
 
 
 if __name__ == "__main__":

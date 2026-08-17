@@ -126,6 +126,32 @@ quantitative endpoints with `category = Quantitative endpoints`, the total N in
 misrepresenting that total as a case count. Any other shape is explicit
 `unresolved`.
 
+## Trait ontology mapping resolver
+
+A separate resolver family, also under `resources/lib/metadata_resolvers/`,
+resolves Trait Ontology Mapping (see `CONTEXT.md`) rather than the
+effect-scale/sample-size fields above — a different output shape, documented
+separately. `resources/lib/metadata_resolvers/canonical_trait_table.R`
+(`resolve_trait_ontology_mapping()`) returns:
+
+| Field | Required | Description |
+|---|---:|---|
+| `resolution_status` | Yes | `resolved` or `unresolved`. |
+| `trait_ontology_id` | Optional | `NA` when `resolution_status = unresolved`. |
+| `trait_ontology_label` | Optional | `NA` when `resolution_status = unresolved`. |
+| `trait_ontology_mapping_method` | Yes | `source_provided`, `canonical_table_lookup`, or `unmapped`. |
+| `resolution_notes` | Optional | Free-text reason when `unmapped`. |
+
+Resolution order: (1) if the Source Collection already supplies an ontology
+ID (e.g. GWAS Catalog's `MAPPED_TRAIT_URI`), pass it through as
+`source_provided`; (2) otherwise, exact-match the Analysis's trait label
+against the curated Canonical Trait Mapping Table Reference Resource
+(`reference-resources/canonical-trait-mapping-efo/`) as
+`canonical_table_lookup`; (3) otherwise `unmapped`, leaving
+`trait_ontology_id`/`trait_ontology_label` blank rather than guessing. See
+`docs/adr/0021-trait-ontology-mapping-lookup-lives-in-registry.md` for why
+this lookup lives in this repo rather than OpenGWASDB.
+
 ## Column classes
 
 `analyses.tsv` spans three column classes:
@@ -133,7 +159,7 @@ misrepresenting that total as a case count. Any other shape is explicit
 | Class | Owner | Where used | Examples |
 |---|---|---|---|
 | Shared core | OpenGWASDB | Release manifests and built stores. These columns carry interpretation-bearing Analysis metadata. | `analysis_id`, `analysis_label`, ontology fields, ancestry fields, effect-scale fields, sample-size fields, Attribution Metadata (`license`, `publication_doi`, `publication_pmid`, `consortium`, `first_author`). |
-| Registry-only | Store registry | Release manifests only. These columns locate source inputs, record provenance, or explain inclusion. | `source_analysis_id`, `source_label`, `source_file`, `source_bundle_id`, `checksum`, `checksum_algorithm`, `size_bytes`, `analysis_group_id`, `inclusion_reason`, `exclude_from_build`. |
+| Registry-only | Store registry | Release manifests only. These columns locate source inputs, record provenance, or explain inclusion. | `source_analysis_id`, `source_label`, `source_file`, `source_bundle_id`, `checksum`, `checksum_algorithm`, `size_bytes`, `analysis_group_id`, `inclusion_reason`, `exclude_from_build`, `trait_ontology_mapping_method`. |
 | Store-only | OpenGWASDB | Built stores only. These columns are produced during or after the build and therefore do not appear in accepted release manifests. | `completed_against`, reference-completion quality rollups, store artifact diagnostics. |
 
 Builders may ignore registry-only columns after using them to locate inputs.
@@ -246,6 +272,7 @@ the source.
 | `analysis_label` | Yes | Free-text, non-unique display label for the Analysis, carried into the built store (shared core, ADR 0034). Typically the same source text as `source_label` when the Source Collection has no separate curated display name. |
 | `trait_ontology_label` | Optional | Ontology or controlled vocabulary that defines `trait_ontology_id`, such as EFO, MONDO, OBA, or a source-local analyte vocabulary. Named `trait_ontology_name` before ADR 0034. |
 | `trait_ontology_id` | Optional | Ontology or controlled-vocabulary identifier for the analysed trait, when available. CURIE format, for example `EFO:0001073`; blank when unmapped. Not required to be unique — several Analyses may legitimately share one. |
+| `trait_ontology_mapping_method` | Yes | Controlled value describing how `trait_ontology_id`/`trait_ontology_label` were resolved: `source_provided`, `canonical_table_lookup`, or `unmapped`. Registry-only; OpenGWASDB's shared schema has no equivalent column yet (see `docs/adr/0021-trait-ontology-mapping-lookup-lives-in-registry.md`). |
 | `source_file` | Yes | Source file or filtered source file consumed by the builder. |
 | `source_bundle_id` | Optional | Identifier for a multi-file Source Bundle when one file is insufficient. |
 | `checksum` | Yes | Checksum for `source_file` or source bundle manifest. |
@@ -313,13 +340,13 @@ effect-scale validation should declare at least:
 | Field | Required | Description |
 |---|---:|---|
 | `resource_id` | Yes | Stable ID for this Reference Resource, referenced from `effect_scale_validation.reference_resources` or `ancestry_assignment.reference_resources`. |
-| `kind` | Yes | `reference_af` for single-ancestry allele-frequency lookup resources used by effect-scale validation; `ancestry_mixture` for multi-ancestry mixture-frequency resources used by AF-based ancestry assignment (issue #23); `qc_panel` for the fixed QC variant panel unconditionally retained regardless of significance (issue #28/#29); other kinds (for example LD panels) may reuse the same declaration shape. |
-| `ancestry` | Yes for `reference_af` | Ancestry/population label the resource represents, matching the controlled `assigned_ancestry` vocabulary. For `ancestry_mixture` resources, which cover multiple super-populations at once, use `ancestry: multi` and list the covered super-populations in `super_populations` instead. |
+| `kind` | Yes | `reference_af` for single-ancestry allele-frequency lookup resources used by effect-scale validation; `ancestry_mixture` for multi-ancestry mixture-frequency resources used by AF-based ancestry assignment (issue #23); `qc_panel` for the fixed QC variant panel unconditionally retained regardless of significance (issue #28/#29); `trait_ontology_mapping` for a curated trait-label-to-ontology-term lookup used by Trait Ontology Mapping resolution; other kinds (for example LD panels) may reuse the same declaration shape. |
+| `ancestry` | Yes for `reference_af` | Ancestry/population label the resource represents, matching the controlled `assigned_ancestry` vocabulary. For `ancestry_mixture` resources, which cover multiple super-populations at once, use `ancestry: multi` and list the covered super-populations in `super_populations` instead. Not applicable for `trait_ontology_mapping`. |
 | `super_populations` | Yes for `ancestry_mixture` | List of super-population labels the mixture reference can assign to (for example `AFR, AMR, EAS, EUR, MID, NAF, SAS`). |
-| `genome_build` | Yes | Genome build of the resource's coordinates. |
-| `variant_id_convention` | Yes | Variant identifier/allele convention used by the resource, for example `chr:pos_ref_alt`, or `chr:pos:A1:A2 (A1 = min(allele1, allele2))` for the canonical ALID convention `opengwasdb.ancestry` uses. |
+| `genome_build` | Yes, except `trait_ontology_mapping` | Genome build of the resource's coordinates. Not applicable for `trait_ontology_mapping`, which has no genomic coordinates. |
+| `variant_id_convention` | Yes, except `trait_ontology_mapping` | Variant identifier/allele convention used by the resource, for example `chr:pos_ref_alt`, or `chr:pos:A1:A2 (A1 = min(allele1, allele2))` for the canonical ALID convention `opengwasdb.ancestry` uses. Not applicable for `trait_ontology_mapping`. |
 | `allele_columns` | Optional | Column-name mapping the resource uses for effect/other allele and frequency, for example `{effect: EA, other: OA, freq: EAF}`. |
-| `location` | Yes | External path or URI for the resource, outside this repository — except `kind: qc_panel`, whose panel file is small enough (~10k rows) to track directly in this repository, so `location` is a repo-relative path instead. |
+| `location` | Yes | External path or URI for the resource, outside this repository — except `kind: qc_panel` and `kind: trait_ontology_mapping`, both small enough to track directly in this repository, so `location` is a repo-relative path instead. |
 | `location_kind` | Optional | How to interpret `location`, for example `external_directory`, `external_file`, or `tracked_file` for a small resource tracked directly in this repository. |
 | `fine_group_map` | Yes for `ancestry_mixture` | External path to the fine-ancestry-group -> super-population map (one row per fine group in the resource) used to aggregate a fitted mixture to super-population composition. |
 
