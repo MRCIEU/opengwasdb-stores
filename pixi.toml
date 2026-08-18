@@ -36,15 +36,22 @@ threadpoolctl = ">=3.0"
 # environment) if pysam is also pinned via conda, so it is left for pip/uv to
 # resolve as a transitive PyPI dependency of opengwasdb itself.
 #
-# Bumped for opengwasdb-stores#68 (GWAS-Catalog-SSF -> Hybrid generator):
-# explodecomputer/opengwasdb#84 registers a GWAS-SSF SourceReader capability
-# (opengwasdb.gwas-ssf) so build_hybrid_from_vcf_manifest can consume
-# harmonised GWAS-SSF sources, not just GWAS-VCF; #85 fixes a real bug that
-# capability exposed -- Dense/Hybrid's VCF-manifest builders hardcoded
+# Bumped for issues #61/#62/#66 after explodecomputer/opengwasdb#48 landed
+# in PR #87 and opengwasdb#86 added shared Analytical Metadata passthrough.
+# This immutable commit provides the native
+# `opengwasdb.finngen-r13` Source Reader Capability and assembly-aware Dense
+# build path used by the FinnGen R13 pilot without dropping its metadata.
+#
+# Previously bumped for opengwasdb-stores#68 (GWAS-Catalog-SSF -> Hybrid
+# generator): explodecomputer/opengwasdb#84 registers a GWAS-SSF SourceReader
+# capability (opengwasdb.gwas-ssf) so build_hybrid_from_vcf_manifest can
+# consume harmonised GWAS-SSF sources, not just GWAS-VCF; #85 fixes a real bug
+# that capability exposed -- Dense/Hybrid's VCF-manifest builders hardcoded
 # hg19->hg38 liftover unconditionally, silently re-lifting (and mispositioning)
 # an already-GRCh38 GWAS-SSF source. Both land as an optional per-row manifest
 # column (source_reader_capability, source_assembly) that every existing
-# manifest omits and is therefore unaffected by.
+# manifest omits and is therefore unaffected by. (This bump's target commit is
+# an ancestor of the current pin above, so both remain true of it.)
 #
 # Previously bumped for issue #63/opengwasdb#74: explodecomputer/opengwasdb#64 ("Unify
 # analyses.tsv across every layout; retire phenotype_id; add Attribution
@@ -62,7 +69,7 @@ threadpoolctl = ">=3.0"
 # (validate_analyses(), to_json_schema()) -- the shared core schema this
 # registry's checks.schema validates emitted manifests against, replacing
 # this repository's hand-rolled per-generator column-name checks.
-opengwasdb = { git = "https://github.com/explodecomputer/opengwasdb", rev = "abc02640b73550006d4a58e0fe89558e5ef4cfdf" }
+opengwasdb = { git = "https://github.com/explodecomputer/opengwasdb", rev = "b2ad3381528d43da9c8d68453861265e1ccb3114" }
 
 [feature.r.dependencies]
 r-base = ">=4.3"
