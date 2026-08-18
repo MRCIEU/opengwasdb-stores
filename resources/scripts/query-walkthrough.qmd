@@ -1,0 +1,477 @@
+---
+title: "Getting started with opengwasdb stores"
+subtitle: "A hands-on command-line tour of the four built pilot stores"
+date: today
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    embed-resources: true
+    theme: cosmo
+---
+
+This is a walkthrough for someone who has never opened an OpenGWASDB store
+before. Everything below is run from the command line, against the real
+pilot stores on this machine, and every output block is pasted verbatim from
+an actual run on 2026-08-19.
+
+If you want the inventory of what exists rather than how to use it, see
+[the store catalog](store-catalog.md).
+
+## What is a store, exactly?
+
+A **store** is just a directory. It holds one set of GWAS (or QTL) summary
+statistics, plus everything needed to interpret them — no database server, no
+central index, nothing to install alongside it. You can copy one to a laptop
+and it still works.
+
+Three pieces matter to you as a user:
+
+| Inside the store | What it is |
+|---|---|
+| `analyses.tsv` | The list of **Analyses** — the GWASes/traits in this store, one per row. Plain TSV; open it in anything. |
+| `variants.tsv.gz` | The list of **Variants** — every SNP the store knows about, with position, alleles, rsid. Sorted and tabix-indexed. |
+| `data.zarr` | The **associations** themselves (z-scores and standard errors). Compressed arrays; you read these through the CLI, not by hand. |
+
+An **association** is one cell: the effect of one Variant on one Analysis.
+
+Two bits of jargon you'll meet immediately:
+
+- **Analysis** — one GWAS/one trait/one gene's eQTL. Identified by an
+  `analysis_id` like `finngen-r13-BMI_IRN` or `GCST009324`.
+- **`alid`** — a variant's identifier in the store, formatted
+  `chr:position:effect_allele:other_allele`, e.g. `1:1585345:C:T`. **This, not
+  the rsid, is what queries take** — see [Gotchas](#gotchas-things-that-will-trip-you-up).
+
+## Setting up
+
+The stores live under `/data/opengwasdb/pilot/`. The `opengwasdb` CLI comes
+from this repository's Pixi `dev` environment, so run everything from the
+repository root:
+
+```bash
+cd /path/to/opengwasdb-stores
+pixi run --environment dev opengwasdb --help
+```
+
+That prefix gets tedious, so for the rest of this page assume two shell
+helpers — the second one is explained in
+[Making results readable](#making-results-readable):
+
+```bash
+ogdb()     { pixi run --environment dev opengwasdb "$@"; }
+readable() { ./resources/scripts/ogdb-readable.sh "$@"; }
+```
+
+And one store to point at:
+
+```bash
+STORE=/data/opengwasdb/pilot/eqtlgen-cis-pilot/releases/pilot-10/store/ragged__eqtlgen-cis-pilot__pilot-10
+```
+
+## Step 1 — what am I holding?
+
+Start with `info`. It reads the store's own manifest and tells you what kind
+of thing this is:
+
+```bash
+ogdb info "$STORE"
+```
+
+```
+store_id: eqtlgen-cis-pilot
+release_id: pilot-10
+format_version: 0.1
+primary_layout: ragged
+association_coverage: cis_and_signals
+completion_state: observed_only
+reference_assembly: GRCh38
+```
+
+The three fields worth understanding:
+
+- **`primary_layout`** — `dense`, `ragged`, or `hybrid`. This is a storage
+  decision (is the store a full variant × analysis grid, or only selected
+  regions?). **You query all three identically**, so mostly you can ignore it.
+- **`completion_state`** — `observed_only` means every number came from the
+  source GWAS. `reference_completed` means gaps have additionally been
+  *imputed* from an LD reference panel. See
+  [Observed vs completed](#observed-versus-reference-completed).
+- **`association_coverage`** — `full` (genome-wide) versus `cis_and_signals`
+  (only regions near the gene of interest, plus significant hits). A
+  `cis_and_signals` store genuinely does not contain most of the genome; an
+  empty result there means "not stored", not "no effect".
+
+## Step 2 — what's in it?
+
+`analyses.tsv` is a plain TSV, so just read it. It's wide (33 columns), so cut
+the ones you care about:
+
+```bash
+cut -f2,3,8,9,31 "$STORE/analyses.tsv" | column -t -s$'\t'
+```
+
+```
+analysis_id                   analysis_label   trait_chr  trait_bp   n_hits_5e8
+ENSG00000175445::whole_blood  ENSG00000175445  8          19791998   1071
+ENSG00000134243::whole_blood  ENSG00000134243  1          109896382  49
+ENSG00000130203::whole_blood  ENSG00000130203  19         45410830   0
+ENSG00000073605::whole_blood  ENSG00000073605  17         38068477   2747
+ENSG00000164308::whole_blood  ENSG00000164308  5          96233531   3358
+ENSG00000232810::whole_blood  ENSG00000232810  6          31544728   1973
+ENSG00000141510::whole_blood  ENSG00000141510  17         7577976    67
+ENSG00000136244::whole_blood  ENSG00000136244  7          22768562   45
+ENSG00000087237::whole_blood  ENSG00000087237  16         57006759   128
+ENSG00000136997::whole_blood  ENSG00000136997  8          128750677  69
+```
+
+Ten genes' whole-blood cis-eQTLs. The `n_hits_5e8` column is precomputed —
+you can see at a glance that ERAP2 (`ENSG00000164308`) and GSDMB
+(`ENSG00000073605`) have thousands of genome-wide-significant cis-eQTLs while
+APOE (`ENSG00000130203`) has none in this pilot.
+
+::: {.callout-tip}
+For a quick sanity check on any store, `cut -f2,3 analyses.tsv` (the ID and
+its human-readable label) is almost always what you want.
+:::
+
+## Step 3 — your first query
+
+Let's ask for the strongest associations in the store:
+
+```bash
+ogdb query-top-hits "$STORE" --limit 5
+```
+
+```json
+[{"analysis_index": 0, "se": 0.01125335693359375, "variant_index": 44579, "z": -6.1796875},
+ {"analysis_index": 0, "se": 0.01198577880859375, "variant_index": 44652, "z": -5.9921875},
+ {"analysis_index": 0, "se": 0.0123138427734375,  "variant_index": 44682, "z": 6.359375},
+ {"analysis_index": 0, "se": 0.0099029541015625,  "variant_index": 44750, "z": 6.80859375},
+ {"analysis_index": 0, "se": 0.00830078125,       "variant_index": 44762, "z": 5.76171875}]
+```
+
+That's a real answer, but not a readable one. **Every query command returns
+JSON keyed by integer positions**, not names:
+
+- `analysis_index` — the row number in `analyses.tsv`
+- `variant_index` — the row number in `variants.tsv.gz`
+- `z` — the effect size divided by its standard error (signed: the sign is
+  relative to the `alid`'s effect allele)
+- `se` — the standard error
+
+There's no p-value and no rsid; you derive them. That's deliberate — the
+store keeps one compact representation rather than many redundant ones — but
+it means step 4 is not optional.
+
+## Step 4 — making results readable {#making-results-readable}
+
+`resources/scripts/ogdb-readable.sh` in this repository does the join for
+you. It reads query JSON on stdin, resolves both indices against the store's
+own `analyses.tsv` and `variants.tsv.gz`, and adds a p-value:
+
+```bash
+ogdb query-top-hits "$STORE" --limit 5 | readable "$STORE" | column -t -s$'\t'
+```
+
+```
+analysis_id                   label            rsid        chr  pos       alid            z       se      p
+ENSG00000175445::whole_blood  ENSG00000175445  rs12678270  8    19422641  8:19422641:A:C  -6.180  0.0113  6.45e-10
+ENSG00000175445::whole_blood  ENSG00000175445  rs73212537  8    19440256  8:19440256:C:T  -5.992  0.0120  2.08e-09
+ENSG00000175445::whole_blood  ENSG00000175445  rs73212544  8    19447574  8:19447574:A:G  6.359   0.0123  2.03e-10
+ENSG00000175445::whole_blood  ENSG00000175445  rs4072132   8    19464046  8:19464046:C:T  6.809   0.0099  9.91e-12
+ENSG00000175445::whole_blood  ENSG00000175445  rs11994026  8    19465874  8:19465874:C:G  5.762   0.0083  8.35e-09
+```
+
+Now it reads: five cis-eQTLs for *LPL* (`ENSG00000175445`) on chromosome 8,
+the strongest at p = 9.9 × 10⁻¹².
+
+The script is ~50 lines of `jq` and `awk` and works on every store regardless
+of layout, because `analyses.tsv` and `variants.tsv.gz` are present in all of
+them. Read it if you want to build the same join into your own pipeline.
+
+::: {.callout-note}
+It scans `variants.tsv.gz` once per invocation. On the small stores that's
+instant; on FinnGen (21 million variants) expect ~30 seconds. Pipe many
+results through one call rather than calling it per row.
+:::
+
+## Step 5 — the five query commands
+
+| Command | Question it answers | Arguments |
+|---|---|---|
+| `query-analysis` | "Give me everything for **this one trait**." | store, `analysis_id` |
+| `query-phewas` | "What does **this one variant** do, across all traits?" | store, `alid` |
+| `query-lookup` | "**These variants** × **these traits**." | store, comma-separated alids, comma-separated analysis_ids |
+| `query-range-phewas` | "Everything in **this genomic window**, across all traits." | store, chromosome, start, end |
+| `query-top-hits` | "The **strongest** associations." | store, `--threshold`, `--limit` |
+
+All five take the store path first and return the same JSON shape, so
+`readable` works on any of them.
+
+### query-analysis
+
+Pull every stored association for one Analysis. These results get large, so
+count them first:
+
+```bash
+ogdb query-analysis "$STORE" "ENSG00000136997::whole_blood" | jq 'length'
+```
+
+```
+7584
+```
+
+7,584 cis associations for *MYC*.
+
+### query-phewas
+
+One variant, every Analysis in the store:
+
+```bash
+ogdb query-phewas "$STORE" 8:127730605:C:T | readable "$STORE" | column -t -s$'\t'
+```
+
+```
+analysis_id                   label            rsid        chr  pos        alid             z      se      p
+ENSG00000136997::whole_blood  ENSG00000136997  rs16902359  8    127730605  8:127730605:C:T  5.855  0.0128  4.77e-09
+```
+
+Only *MYC* comes back — reasonably, since this is a 10-gene store and this
+variant is only in *MYC*'s cis window.
+
+### query-top-hits, per analysis
+
+`query-top-hits` has no per-Analysis flag; it returns hits across the whole
+store, ordered by `analysis_index`. To focus on one Analysis, look its index
+up and filter with `jq`:
+
+```bash
+# which row of analyses.tsv is MYC?
+awk -F'\t' '$2=="ENSG00000136997::whole_blood" {print $1}' "$STORE/analyses.tsv"
+```
+
+```
+9
+```
+
+```bash
+ogdb query-top-hits "$STORE" --threshold 5e-8 \
+  | jq '[.[] | select(.analysis_index == 9)][:5]' \
+  | readable "$STORE" | column -t -s$'\t'
+```
+
+```
+analysis_id                   label            rsid        chr  pos        alid             z       se      p
+ENSG00000136997::whole_blood  ENSG00000136997  rs16902359  8    127730605  8:127730605:C:T  5.855   0.0128  4.77e-09
+ENSG00000136997::whole_blood  ENSG00000136997  rs73707295  8    127745590  8:127745590:A:G  5.906   0.0138  3.51e-09
+ENSG00000136997::whole_blood  ENSG00000136997  rs6990534   8    127801845  8:127801845:A:G  -6.070  0.0096  1.28e-09
+ENSG00000136997::whole_blood  ENSG00000136997  rs74537278  8    127841734  8:127841734:C:T  -5.941  0.0152  2.84e-09
+ENSG00000136997::whole_blood  ENSG00000136997  rs17189681  8    127891027  8:127891027:G:T  5.797   0.0128  6.78e-09
+```
+
+`jq` is worth learning for exactly this reason — it slices, filters, and
+sorts the query output before you resolve it.
+
+## The four stores, and what each is good for
+
+The four pilot stores deliberately cover different shapes of data. Set
+`STORE` to any of these and every command above still works.
+
+### finngen-r13 — disease endpoints (Dense)
+
+20 FinnGen endpoints, genome-wide.
+
+```bash
+STORE=/data/opengwasdb/pilot/finngen-r13/releases/r13-pilot-20/store.opengwasdb
+cut -f2,3 "$STORE/analyses.tsv" | head -7 | column -t -s$'\t'
+```
+
+```
+analysis_id                       analysis_label
+finngen-r13-BMI_IRN               Body mass index, inverse-rank normalized
+finngen-r13-HEIGHT_IRN            Height, inverse-rank normalized
+finngen-r13-WEIGHT_IRN            Weight, inverse-rank normalized
+finngen-r13-RX_PARACETAMOL_NSAID  Paracetamol or NSAID medication
+finngen-r13-K11_ORAL              Diseases of oral cavity, salivary glands and jaws
+finngen-r13-FG_CVD                Cardiovascular diseases (excluding rheumatic etc)
+```
+
+This is what `query-lookup` is for — one variant across chosen endpoints, in
+a single call:
+
+```bash
+ogdb query-lookup "$STORE" 1:1585345:C:T \
+  finngen-r13-BMI_IRN,finngen-r13-HEIGHT_IRN,finngen-r13-WEIGHT_IRN,finngen-r13-FG_CVD \
+  | readable "$STORE" | cut -f1,2,6,7,8,9 | column -t -s$'\t'
+```
+
+```
+analysis_id             label                                              alid           z       se      p
+finngen-r13-BMI_IRN     Body mass index, inverse-rank normalized           1:1585345:C:T  5.551   0.0023  2.85e-08
+finngen-r13-HEIGHT_IRN  Height, inverse-rank normalized                    1:1585345:C:T  -0.667  0.0017  5.05e-01
+finngen-r13-WEIGHT_IRN  Weight, inverse-rank normalized                    1:1585345:C:T  5.145   0.0022  2.69e-07
+finngen-r13-FG_CVD      Cardiovascular diseases (excluding rheumatic etc)  1:1585345:C:T  2.711   0.0052  6.71e-03
+```
+
+A BMI-associated variant that also moves weight (as you'd hope), does
+nothing to height, and is only weakly associated with cardiovascular disease.
+
+### gwas-catalog-eur-hybrid — published disease GWAS (Hybrid)
+
+10 European case-control GWAS from the GWAS Catalog. "Hybrid" means the store
+splits variants between a shared dense panel and a per-analysis overflow —
+invisible at query time:
+
+```bash
+STORE=/data/opengwasdb/pilot/gwas-catalog-eur-hybrid/releases/eur-hybrid-pilot-10/store/hybrid__European__pilot10-cc
+ogdb query-phewas "$STORE" 1:152220451:C:G | readable "$STORE" | cut -f1,2,7,9 | column -t -s$'\t'
+```
+
+```
+analysis_id  label                                                                              z       p
+GCST007320   Alzheimer's disease or family history of Alzheimer's disease                       -2.482  1.30e-02
+GCST009324   Parkinson's disease                                                                7.535   4.92e-14
+GCST009325   Parkinson's disease or first degree relation to individual with Parkinson's disease 7.500   6.43e-14
+```
+
+A strong Parkinson's signal that replicates across the two independent
+Parkinson's Analyses in the pilot, and is essentially absent elsewhere.
+
+### metabolome-plasma-2023 — 1,400 metabolites (Ragged)
+
+The Chen et al. 2023 plasma metabolome. With this many Analyses,
+`query-range-phewas` becomes the interesting one: point it at a locus and ask
+what the locus *does*. Here's the FADS1/FADS2 region, a well-known lipid
+metabolism hub:
+
+```bash
+STORE=/data/opengwasdb/pilot/metabolome-plasma-2023/releases/2023-chen-full-european/store/ragged__pmid-36635386__European
+ogdb query-range-phewas "$STORE" 11 61750000 61900000 | jq 'length'
+```
+
+```
+67316
+```
+
+67,316 associations in a 150 kb window. Use `jq` to keep only each
+metabolite's single strongest variant, then take the top 6:
+
+```bash
+ogdb query-range-phewas "$STORE" 11 61750000 61900000 \
+  | jq 'group_by(.analysis_index) | map(max_by(.z|fabs)) | sort_by(.z|fabs) | reverse | .[:6]' \
+  | readable "$STORE" | cut -f1,2,3,5,7,9 | column -t -s$'\t'
+```
+
+```
+analysis_id   label                                                                                                     rsid      pos       z        p
+GCST90200685  1-stearoyl-2-arachidonoyl-GPC (18:0/20:4) levels                                                          rs174564  61820833  47.781   <1e-300
+GCST90200692  1-palmitoyl-2-arachidonoyl-gpc (16:0/20:4n6) levels                                                       rs102275  61790331  -41.438  <1e-300
+GCST90199788  1-arachidonoyl-gpc (20:4n6) levels                                                                        rs102275  61790331  -37.719  <1e-300
+GCST90200052  1-(1-enyl-palmitoyl)-2-arachidonoyl-gpc (p-16:0/20:4) levels                                              rs102275  61790331  -31.219  6.74e-214
+GCST90200794  Oleoyl-linoleoyl-glycerol (18:1 to 18:2) [2] to linoleoyl-arachidonoyl-glycerol (18:2 to 20:4) [1] ratio  rs174564  61820833  -31.016  3.77e-211
+GCST90200740  Arachidonate (20:4n6) to oleate to vaccenate (18:1) ratio                                                 rs174564  61820833  28.469   3.21e-178
+```
+
+Every top metabolite is arachidonate-containing, and the lead variants
+(rs174564, rs102275) are the canonical FADS variants — the store reproduces
+textbook biology in one command.
+
+## Observed versus reference-completed {#observed-versus-reference-completed}
+
+Some stores ship a second, `-completed` release alongside the original. That
+release has had missing cells **imputed** from an LD reference panel. The
+difference is visible immediately:
+
+```bash
+EQ=/data/opengwasdb/pilot/eqtlgen-cis-pilot/releases/pilot-10/store
+ogdb query-analysis "$EQ/ragged__eqtlgen-cis-pilot__pilot-10"           "ENSG00000136997::whole_blood" | jq 'length'
+ogdb query-analysis "$EQ/ragged__eqtlgen-cis-pilot__pilot-10-completed" "ENSG00000136997::whole_blood" | jq 'length'
+```
+
+```
+7584
+18988
+```
+
+Same gene, 2.5× the associations. The extra 11,404 are **statistical
+inferences, not measurements**.
+
+::: {.callout-warning}
+The CLI's JSON does not distinguish observed from imputed cells — it returns
+`z` and `se` either way. The Python API does, via `association_status`
+(`observed` / `imputed` / `missing`) on each returned row. If that distinction
+matters to your analysis, use the Python API against completed stores, or
+query the `observed_only` release instead.
+:::
+
+## Gotchas — things that will trip you up {#gotchas}
+
+**Queries take `alid`, not rsid.** This is the big one. Every store here has
+an empty variant-alias table, so passing an rsid returns nothing at all — not
+an error, just an empty result you could easily misread as "no association":
+
+```bash
+STORE=/data/opengwasdb/pilot/eqtlgen-cis-pilot/releases/pilot-10/store/ragged__eqtlgen-cis-pilot__pilot-10
+ogdb query-phewas "$STORE" rs16902359         # -> []
+ogdb query-phewas "$STORE" 8:127730605:C:T    # -> the association
+```
+
+To go from an rsid to its `alid`, scan the store's variant table (column 7 is
+the rsid, column 6 the `alid`):
+
+```bash
+MET=/data/opengwasdb/pilot/metabolome-plasma-2023/releases/2023-chen-full-european/store/ragged__pmid-36635386__European
+zcat "$MET/variants.tsv.gz" | awk -F'\t' '$7=="rs174564" {print $6; exit}'
+```
+
+```
+11:61820833:A:G
+```
+
+If you already know the position, `tabix` is instant and avoids the scan:
+
+```bash
+tabix "$STORE/variants.tsv.gz" 8:127730605-127730605
+```
+
+```
+8	127730605	55565	C	T	8:127730605:C:T	rs16902359	.
+```
+
+**Allele order matters in an `alid`.** It is
+`chr:pos:effect_allele:other_allele`. `8:127730605:C:T` and
+`8:127730605:T:C` are different keys, and the sign of `z` follows the effect
+allele.
+
+**An empty result may mean "not stored".** In a `cis_and_signals` store
+(`eqtlgen-cis-pilot`, `metabolome-plasma-2023`), most of the genome was
+never stored. Check `association_coverage` in `ogdb info` before concluding
+there's no effect.
+
+**Not every store has rsids.** FinnGen and the GWAS Catalog hybrid stores
+have `rsid` empty throughout (shown as `-` by `readable`); their variants are
+only addressable by `alid`.
+
+**`trait_bp` in `eqtlgen-cis-pilot` is on the source build.** The store's
+variants are GRCh38, but `analyses.tsv`'s `trait_chr`/`trait_bp` carry the
+hg19 coordinates from the source BESD files (the manifest records
+`source_build: hg19`). *MYC* is listed at `8:128750677` (hg19) while its own
+cis-eQTLs sit around 127.7–127.9 Mb (hg38). Don't mix the two when defining
+a window.
+
+**Store paths are not uniform.** Each family lays its releases out slightly
+differently — `.../store.opengwasdb` for FinnGen, `.../store/<name>` for the
+others. Use tab-completion, or copy the paths from
+[the store catalog](store-catalog.md).
+
+## Where to go next
+
+- [Store catalog](store-catalog.md) — every built release, its exact path,
+  size, and known caveats.
+- `ogdb <command> --help` — every command takes it.
+- `resources/scripts/ogdb-readable.sh` — the resolution logic, if you want to
+  reimplement it in your own pipeline.
+- The Python API (`import opengwasdb`) — same queries, plus
+  `association_status`, genetic-correlation (`rho`) matrices, and results as
+  NumPy arrays rather than JSON.
