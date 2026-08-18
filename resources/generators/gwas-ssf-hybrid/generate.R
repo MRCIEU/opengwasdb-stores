@@ -192,6 +192,12 @@ manifest_rows <- function(cfg, selected, paths, canonical_table = NULL) {
   x[, original_sd := ""]
   x[, original_sd_method := cfg$defaults$original_sd_method]
   x[, stored_effect_scale := cfg$defaults$stored_effect_scale]
+  # The candidates table represents "not a case-control study" as n_cases=0/
+  # n_controls=0, not NA -- honest here would be blank (schema doc: these
+  # counts are "Required when stored_effect_scale = log_or/log_hazard",
+  # optional otherwise), not a fabricated zero case count.
+  x[, n_cases := fifelse(stored_effect_scale %in% c("log_or", "log_hazard"), n_cases, NA_real_)]
+  x[, n_controls := fifelse(stored_effect_scale %in% c("log_or", "log_hazard"), n_controls, NA_real_)]
   x[, sample_size_kind := cfg$defaults$sample_size_kind]
   x[, sample_size_scope := cfg$defaults$sample_size_scope %||% "analysis_level"]
   x[, license := cfg$defaults$license]
@@ -261,20 +267,6 @@ manifest_rows <- function(cfg, selected, paths, canonical_table = NULL) {
   ans[]
 }
 
-build_reference_resources_yaml <- function(cfg) {
-  declared <- cfg$reference_resources %||% list()
-  lapply(declared, function(res) {
-    list(
-      resource_id = res$resource_id,
-      kind = res$kind,
-      genome_build = res$genome_build,
-      variant_id_convention = res$variant_id_convention,
-      location = res$location,
-      location_kind = res$location_kind %||% "external_file"
-    )
-  })
-}
-
 write_build_yaml <- function(cfg, root, release_dir, paths) {
   write_yaml_file(list(
     store_family_id = cfg$store_family_id,
@@ -298,6 +290,7 @@ write_build_yaml <- function(cfg, root, release_dir, paths) {
     effects = list(stored_effect_scale = cfg$defaults$stored_effect_scale),
     shape = list(association_coverage = cfg$association_coverage),
     reference_resources = build_reference_resources_yaml(cfg),
+    effect_scale_validation = build_effect_scale_validation_yaml(cfg),
     validation = list(required = TRUE),
     artifacts = list(
       artifact_root = paths$artifact_root,
@@ -354,7 +347,8 @@ emit_bundle <- function(cfg, root) {
     lineage = list(derived_from = NULL),
     sidecars = list(
       download_summary = "sidecars/download_summary.tsv",
-      build_report = "sidecars/build_report.tsv"
+      build_report = "sidecars/build_report.tsv",
+      sd_estimation = "sidecars/sd_estimation.tsv"
     ),
     notes = cfg$notes %||% ""
   ), file.path(release_dir, "release.yaml"))
@@ -411,7 +405,7 @@ download_release <- function(cfg, root, max_analyses = NA_integer_, only_analysi
   release_dir <- path_abs(root, cfg$output$release_dir)
   analyses_path <- file.path(release_dir, "analyses.tsv")
   if (!file.exists(analyses_path)) emit_bundle(cfg, root)
-  analyses <- fread(analyses_path, sep = "\t", na.strings = "")
+  analyses <- fread(analyses_path, sep = "\t", na.strings = "", colClasses = list(character = "exclude_from_build"))
   for (col in c("checksum", "size_bytes")) {
     if (!col %in% names(analyses)) analyses[, (col) := ""]
     analyses[, (col) := fifelse(is.na(as.character(get(col))), "", as.character(get(col)))]
@@ -485,7 +479,7 @@ download_release <- function(cfg, root, max_analyses = NA_integer_, only_analysi
 validate_emit <- function(cfg, root) {
   release_dir <- path_abs(root, cfg$output$release_dir)
   analyses_path <- file.path(release_dir, "analyses.tsv")
-  analyses <- fread(analyses_path, sep = "\t", na.strings = "")
+  analyses <- fread(analyses_path, sep = "\t", na.strings = "", colClasses = list(character = "exclude_from_build"))
 
   required <- c(
     "analysis_index", "analysis_id", "source_analysis_id", "source_label",
@@ -524,7 +518,7 @@ validate_emit <- function(cfg, root) {
 merge_validation_checks <- function(release_dir, checks, validator_name) {
   path <- file.path(release_dir, "validation.yaml")
   current <- if (file.exists(path)) read_yaml(path) else list(status = "not_run", checks = list())
-  known_checks <- c("schema", "files", "reader_smoke_test")
+  known_checks <- c("schema", "files", "reader_smoke_test", "effect_scale", "sd_estimation")
   for (key in intersect(names(checks), known_checks)) current$checks[[key]] <- checks[[key]]
   current$warnings <- as.list(unique(c(unlist(as.list(current$warnings)), checks$warnings)))
   current$errors <- as.list(unique(c(unlist(as.list(current$errors)), checks$errors)))
@@ -545,9 +539,118 @@ refresh_build_mode <- function(cfg, root) {
   cat(sprintf("Refreshed build.yaml for %s\n", release_dir))
 }
 
+# resources/lib/effect_scale_validation.R's phenotype-SD estimator shells out
+# to a Python bridge with every retained variant's se/af/beta serialised as a
+# JSON array on the command line (estimate_phenotype_sd()) -- fine for
+# Ragged's sparse per-Analysis subset (hundreds to low-thousands of
+# variants), but a full genome-wide harmonised file easily retains hundreds
+# of thousands of variants after MAF/palindrome filtering, and the
+# estimated_from_source_maf/estimated_from_reference_maf tiers serialise
+# *both* an --se and an --af JSON array onto the same command line. Confirmed
+# empirically against this system (not guessed): 3,000 realistic-precision
+# se+af pairs (~111 KB serialised total) succeeds, 4,000 (~148 KB) reliably
+# fails with "cannot popen" -- well below this system's actual OS ARG_MAX
+# (2 MB), so this is an R/libc popen() command-string limit, not the shell
+# argument-list-length framing the error text suggests. Rather than changing
+# the shared engine's contract (used unchanged by gwas-ssf-ragged, whose
+# sparse per-Analysis files never approach this), this samples a bounded,
+# deterministic subset of each downloaded file's rows before handing it to
+# run_effect_scale_stage(). SD_ESTIMATION_MAX_VARIANTS keeps a wide safety
+# margin under the observed failure point while staying far above
+# thresholds$min_overlap_variants (a robust median-implied-SD estimate needs
+# nowhere near this many sites).
+SD_ESTIMATION_MAX_VARIANTS <- 2000L
+
+thin_for_sd_estimation <- function(full_path, out_path, max_variants = SD_ESTIMATION_MAX_VARIANTS) {
+  wanted_cols <- c(
+    "chromosome", "base_pair_location", "effect_allele", "other_allele",
+    "beta", "standard_error", "effect_allele_frequency"
+  )
+  header <- names(fread(full_path, nrows = 0))
+  cols <- intersect(wanted_cols, header)
+  rows <- fread(full_path, select = cols, showProgress = FALSE)
+  rows <- rows[!is.na(beta) & !is.na(standard_error)]
+  if (nrow(rows) > max_variants) {
+    set.seed(1L)  # deterministic sample -- reproducible across re-runs
+    rows <- rows[sample.int(nrow(rows), max_variants)]
+  }
+  fwrite(rows, out_path, sep = "\t")
+  nrow(rows)
+}
+
+# Reference-AF phenotype-SD estimation for quantitative Analyses (issue #70):
+# this multi-publication pool has no per-family curated effect-scale method
+# the way a single-paper Store Family does, so a quantitative Analysis's
+# original_sd_method has to be established empirically rather than assumed.
+# Reuses resources/lib/effect_scale_validation.R's engine unchanged --
+# already proven end-to-end by gwas-ssf-ragged -- pointed at a bounded
+# subsample of each full harmonised file (thin_for_sd_estimation() above),
+# not the full file itself.
+effect_scale_stage <- function(cfg, root) {
+  release_dir <- path_abs(root, cfg$output$release_dir)
+  analyses_path <- file.path(release_dir, "analyses.tsv")
+  paths <- artifact_paths(cfg, root)
+  analyses <- fread(analyses_path, sep = "\t", na.strings = "", colClasses = list(character = "exclude_from_build"))
+  analyses[, sd_estimation_file := sprintf("%s.sd-sample.tsv.gz", analysis_id)]
+  for (i in seq_len(nrow(analyses))) {
+    row <- analyses[i]
+    n_sampled <- thin_for_sd_estimation(
+      file.path(paths$download_dir, row$downloaded_file),
+      file.path(paths$download_dir, row$sd_estimation_file)
+    )
+    cat(sprintf("[%d/%d] %s: sampled %d variants for SD estimation\n", i, nrow(analyses), row$analysis_id, n_sampled))
+  }
+  fwrite(analyses, analyses_path, sep = "\t", na = "")
+
+  reference_resources <- resolve_reference_resources_from_config(cfg)
+  thresholds <- default_thresholds(cfg$effect_scale_validation)
+  result <- run_effect_scale_stage(
+    release_dir, paths$download_dir, reference_resources, thresholds,
+    filtered_file_col = "sd_estimation_file"
+  )
+
+  # A quantitative Analysis whose empirical SD estimation is skipped or fails
+  # leaves original_sd_method=unavailable (run_effect_scale_stage()'s initial
+  # value for every non-declared_standardised row that never got a passing
+  # estimate) -- opengwasdb's builder raises loudly on that value rather than
+  # silently defaulting (issue #18), so such a row is excluded from this
+  # build rather than crashing the whole 10-Analysis batch over one
+  # unresolved row, matching this schema's own documented exclude_from_build
+  # semantics ("retained for audit but intentionally skipped by the build").
+  analyses <- result$analyses
+  newly_unavailable <- analyses$original_sd_method == "unavailable" &
+    (is.na(analyses$exclude_from_build) | analyses$exclude_from_build != "true")
+  if (any(newly_unavailable)) {
+    analyses[newly_unavailable, exclude_from_build := "true"]
+    analyses[newly_unavailable, inclusion_reason := paste0(
+      inclusion_reason, "; excluded_reason: phenotype-SD estimation unavailable (checks.sd_estimation)"
+    )]
+    fwrite(analyses, file.path(release_dir, "analyses.tsv"), sep = "\t", na = "")
+    cat(sprintf(
+      "%d analysis(es) excluded from build: phenotype-SD estimation unavailable\n",
+      sum(newly_unavailable)
+    ))
+  }
+  set_sd_estimation_sidecar_pointer(release_dir)
+  merge_validation_checks(
+    release_dir, result$checks,
+    "resources/generators/gwas-ssf-hybrid/generate.R"
+  )
+  status_counts <- table(result$sidecar$status)
+  cat(sprintf(
+    "Effect-scale validation: %d analyses (%s); checks.effect_scale=%s checks.sd_estimation=%s\n",
+    nrow(result$sidecar),
+    paste(sprintf("%s=%d", names(status_counts), status_counts), collapse = ", "),
+    result$checks$effect_scale, result$checks$sd_estimation
+  ))
+  invisible(result)
+}
+
 args <- parse_args(commandArgs(trailingOnly = TRUE))
 root <- repo_root()
 source(path_abs(root, "resources/lib/gwas_catalog_ssf_url.R"))
+source(path_abs(root, "resources/lib/effect_scale_validation.R"))
+source(path_abs(root, "resources/lib/effect_scale_stage_yaml.R"))
 source(path_abs(root, "resources/lib/build_environment.R"))
 source(path_abs(root, "resources/lib/schema_validate.R"))
 source(path_abs(root, "resources/lib/metadata_resolvers/ontology_contract.R"))
@@ -564,6 +667,8 @@ if (args$mode == "emit") {
   validate_emit(cfg, root)
 } else if (args$mode == "refresh-build") {
   refresh_build_mode(cfg, root)
+} else if (args$mode == "effect-scale") {
+  effect_scale_stage(cfg, root)
 } else if (args$mode == "all") {
   emit_bundle(cfg, root)
   validate_emit(cfg, root)

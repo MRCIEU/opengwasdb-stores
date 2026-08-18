@@ -381,23 +381,6 @@ manifest_rows <- function(cfg, selected, target_summary, paths, has_targets = TR
   ans[]
 }
 
-build_reference_resources_yaml <- function(cfg) {
-  declared <- cfg$reference_resources %||% list()
-  lapply(declared, function(res) {
-    list(
-      resource_id = res$resource_id,
-      kind = res$kind %||% "reference_af",
-      ancestry = res$ancestry,
-      genome_build = res$genome_build,
-      variant_id_convention = res$variant_id_convention,
-      allele_columns = res$allele_columns,
-      location = res$root,
-      location_kind = res$location_kind %||% "external_directory",
-      fine_group_map = res$fine_group_map
-    )
-  })
-}
-
 find_reference_resource_root <- function(cfg, resource_id) {
   declared <- cfg$reference_resources %||% list()
   for (res in declared) {
@@ -427,23 +410,6 @@ build_ancestry_assignment_yaml <- function(cfg) {
       delta = aa$gates$delta %||% 0.20,
       n_min = aa$gates$n_min %||% 5000L,
       residual_max = aa$gates$residual_max %||% 0.06
-    )
-  )
-}
-
-build_effect_scale_validation_yaml <- function(cfg) {
-  esv <- cfg$effect_scale_validation
-  if (is.null(esv)) return(NULL)
-  list(
-    enabled = esv$enabled %||% TRUE,
-    reference_resources = esv$reference_resources %||% list(),
-    thresholds = list(
-      maf_min = esv$maf_min %||% 0.01,
-      maf_max = esv$maf_max %||% 0.5,
-      min_overlap_variants = esv$min_overlap_variants %||% 20L,
-      sd_tolerance = esv$sd_tolerance %||% 0.15,
-      warning_multiplier = esv$warning_multiplier %||% 2.0,
-      dispersion_max = esv$dispersion_max %||% 0.5
     )
   )
 }
@@ -1102,17 +1068,6 @@ merge_validation_checks <- function(release_dir, checks, validator_name) {
   write_yaml_file(current, path)
 }
 
-set_sd_estimation_sidecar_pointer <- function(release_dir) {
-  path <- file.path(release_dir, "release.yaml")
-  if (!file.exists(path)) return(invisible())
-  current <- read_yaml(path)
-  if (is.null(current$sidecars)) current$sidecars <- list()
-  if (is.null(current$sidecars$sd_estimation)) {
-    current$sidecars$sd_estimation <- "sidecars/sd_estimation.tsv"
-    write_yaml_file(current, path)
-  }
-}
-
 effect_scale_stage <- function(cfg, root) {
   release_dir <- path_abs(root, cfg$output$release_dir)
   paths <- artifact_paths(cfg, root)
@@ -1145,6 +1100,7 @@ args <- parse_args(commandArgs(trailingOnly = TRUE))
 root <- repo_root()
 source(path_abs(root, "resources/lib/gwas_catalog_ssf_url.R"))
 source(path_abs(root, "resources/lib/effect_scale_validation.R"))
+source(path_abs(root, "resources/lib/effect_scale_stage_yaml.R"))
 source(path_abs(root, "resources/lib/build_environment.R"))
 source(path_abs(root, "resources/lib/schema_validate.R"))
 source(path_abs(root, "resources/lib/metadata_resolvers/ontology_contract.R"))

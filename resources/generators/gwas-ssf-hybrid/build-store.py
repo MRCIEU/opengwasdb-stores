@@ -102,7 +102,11 @@ def main() -> None:
     root = repo_root(release_dir)
     release = read_release_yaml(release_dir / "release.yaml")
     build = read_release_yaml(release_dir / "build.yaml")
-    rows = read_tsv(release_dir / "analyses.tsv")
+    all_rows = read_tsv(release_dir / "analyses.tsv")
+    excluded_rows = [r for r in all_rows if r.get("exclude_from_build") == "true"]
+    rows = [r for r in all_rows if r.get("exclude_from_build") != "true"]
+    if not rows:
+        raise SystemExit("every analysis in analyses.tsv is excluded from build (exclude_from_build=true)")
 
     store_dir = (
         Path(args.store_dir).resolve()
@@ -149,13 +153,17 @@ def main() -> None:
         "n_panel": result.n_panel,
         "n_off_panel": result.n_off_panel,
         "n_overflow_associations": result.n_overflow,
+        "n_excluded": len(excluded_rows),
         "probe_analysis_id": probe_id,
         "probe_n_associations": len(assoc["z"]),
         "probe_n_finite_z": n_finite,
         "probe_stored_effect_scale": probe_row.get("stored_effect_scale"),
         "probe_analysis_label": probe_row.get("analysis_label"),
     }
-    warnings = []
+    warnings = [
+        f"{row['analysis_id']}: excluded from build -- {row.get('inclusion_reason', '')}"
+        for row in excluded_rows
+    ]
     if n_finite == 0:
         warnings.append(f"{probe_id}: zero finite association statistics in built store")
     if result.n_off_panel == 0 or result.n_overflow == 0:

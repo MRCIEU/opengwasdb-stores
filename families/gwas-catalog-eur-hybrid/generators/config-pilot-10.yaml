@@ -65,5 +65,5 @@ reference_resources:
     kind: hybrid_dense_panel
     genome_build: GRCh38
     variant_id_convention: "chr:pos:A1:A2 (A1 = min(allele1, allele2))"
-    location: /data/opengwasdb/wip/hybrid-ieua/panel_alids.txt
+    root: /data/opengwasdb/wip/hybrid-ieua/panel_alids.txt
     location_kind: external_file
