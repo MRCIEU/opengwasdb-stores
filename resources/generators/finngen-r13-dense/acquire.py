@@ -56,8 +56,8 @@ def _total_size(response: object, start: int) -> int | None:
         return None
 
 
-def acquire(url: str, target: Path) -> tuple[str, str]:
-    """Return (status, etag), atomically promoting a completed .part file."""
+def acquire(url: str, target: Path, expected_checksum: str = "") -> tuple[str, str, str]:
+    """Return status, ETag, and SHA-256 after validating then promoting `.part`."""
     target.parent.mkdir(parents=True, exist_ok=True)
     part = target.with_name(target.name + ".part")
     start = part.stat().st_size if part.exists() else 0
@@ -82,8 +82,14 @@ def acquire(url: str, target: Path) -> tuple[str, str]:
         raise OSError(
             f"incomplete download for {url}: got {part.stat().st_size} bytes, expected {total_size}"
         )
+    checksum = sha256_file(part)
+    if expected_checksum and checksum != expected_checksum:
+        raise OSError(
+            f"downloaded artifact checksum {checksum} does not match manifest "
+            f"{expected_checksum}"
+        )
     os.replace(part, target)
-    return ("resumed" if resumed else "downloaded"), etag
+    return ("resumed" if resumed else "downloaded"), etag, checksum
 
 
 def acquire_one(
@@ -103,8 +109,9 @@ def acquire_one(
             status = "cached"
             etag = previous.get(analysis_id, {}).get("source_etag", "")
         else:
-            status, etag = acquire(row["source_url"], target)
-            checksum = sha256_file(target)
+            status, etag, checksum = acquire(
+                row["source_url"], target, expected_checksum
+            )
         size = target.stat().st_size
         row["checksum_algorithm"] = "sha256"
         row["checksum"] = checksum
@@ -159,9 +166,30 @@ def main() -> None:
     } if previous_downloads_path.exists() else {}
     with ThreadPoolExecutor(max_workers=args.workers) as executor:
         outcomes = list(executor.map(lambda row: acquire_one(row, previous), selected))
-    reports = [report for report, _error in outcomes]
+    selected_reports = {
+        str(report["analysis_id"]): report for report, _error in outcomes
+    }
     errors = [error for _report, error in outcomes if error]
-
+    reports = [
+        selected_reports[row["analysis_id"]]
+        if row["analysis_id"] in selected_reports
+        else previous[row["analysis_id"]]
+        for row in rows
+        if row["analysis_id"] in selected_reports or row["analysis_id"] in previous
+    ]
+    reports_by_id = {str(report["analysis_id"]): report for report in reports}
+    missing_evidence = [
+        row["analysis_id"] for row in rows if row["analysis_id"] not in reports_by_id
+    ]
+    evidence_errors = [
+        *errors,
+        *(f"{analysis_id}: missing download evidence" for analysis_id in missing_evidence),
+        *(
+            f"{report['analysis_id']}: {report.get('error') or 'acquisition failed'}"
+            for report in reports
+            if report.get("status") == "failed"
+        ),
+    ]
     fieldnames = list(rows[0])
     write_tsv(analyses_path, rows, fieldnames)
     report_path = release_dir / "sidecars" / "downloads.tsv"
@@ -170,12 +198,12 @@ def main() -> None:
     merge_validation_yaml(
         release_dir / "validation.yaml",
         validator_name="resources/generators/finngen-r13-dense/acquire.py",
-        updated_checks={"files": "failed" if errors else "passed"},
+        updated_checks={"files": "failed" if evidence_errors else "passed"},
         updated_reports={"downloads": "sidecars/downloads.tsv"},
-        new_warnings=errors,
+        new_warnings=evidence_errors,
     )
-    if errors:
-        raise SystemExit("FinnGen acquisition failed:\n" + "\n".join(errors))
+    if evidence_errors:
+        raise SystemExit("FinnGen acquisition failed:\n" + "\n".join(evidence_errors))
     print(f"Acquired {len(selected)} FinnGen artifacts ({sum(r['status'] == 'cached' for r in reports)} cached)")
 
 

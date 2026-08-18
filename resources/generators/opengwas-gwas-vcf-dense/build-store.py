@@ -111,6 +111,34 @@ def first_probe(rows: list[dict[str, str]], scale: str) -> str:
     return next((row["analysis_id"] for row in rows if row["stored_effect_scale"] == scale), "")
 
 
+def metadata_mismatch_errors(
+    rows: list[dict[str, str]], store_by_id: dict[str, dict[str, str]]
+) -> list[str]:
+    """Return exact interpretation-bearing manifest/Store mismatches."""
+    errors = []
+    for row in rows:
+        analysis_id = row["analysis_id"]
+        store_row = store_by_id.get(analysis_id)
+        if store_row is None:
+            errors.append(f"{analysis_id}: missing from built Store analyses.tsv")
+            continue
+        metadata_columns = (
+            "analysis_label", "trait_ontology_id", "trait_ontology_label",
+            "stored_effect_scale", "sample_size_kind", "sample_size_scope",
+            "sample_size", "n_cases", "n_controls", "assigned_ancestry",
+            "ancestry_assignment_method", "original_effect_scale", "original_sd",
+            "original_sd_method",
+            *(column for column in row if column.startswith("ancestry_prop_")),
+        )
+        for column in metadata_columns:
+            if store_row.get(column, "") != row.get(column, ""):
+                errors.append(
+                    f"{analysis_id}: built {column}={store_row.get(column)!r} "
+                    f"!= manifest {row.get(column)!r}"
+                )
+    return errors
+
+
 def main() -> None:
     args = parse_args()
     if args.workers < 1:
@@ -189,11 +217,11 @@ def main() -> None:
         "quantitative_probe_n_finite_z": finite_by_probe.get(quantitative_probe_id, 0),
         "store_validation_status": "passed" if store_validation.ok else "failed",
     }
-    warnings = []
+    failures = []
     for probe_id, n_finite in finite_by_probe.items():
         if n_finite == 0:
-            warnings.append(f"{probe_id}: zero finite association statistics in built store")
-    warnings.extend(f"store validation: {error}" for error in store_validation.errors)
+            failures.append(f"{probe_id}: zero finite association statistics in built store")
+    failures.extend(f"store validation: {error}" for error in store_validation.errors)
 
     # Confirm shared-core columns the manifest actually populated (resolved
     # stored_effect_scale -- opengwasdb#14 -- plus analysis_label/
@@ -201,27 +229,7 @@ def main() -> None:
     # analyses.tsv for every Analysis, not just the probe. Dense's builder is
     # documented to carry these through (unlike Ragged's -- opengwasdb#83),
     # but confirm it rather than assume it.
-    for row in rows:
-        store_row = store_by_id.get(row["analysis_id"], {})
-        if store_row.get("stored_effect_scale") != row["stored_effect_scale"]:
-            warnings.append(
-                f"{row['analysis_id']}: built store stored_effect_scale="
-                f"{store_row.get('stored_effect_scale')!r} != manifest-resolved "
-                f"{row['stored_effect_scale']!r}"
-            )
-        metadata_columns = (
-            "analysis_label", "trait_ontology_id", "trait_ontology_label",
-            "sample_size_kind", "sample_size_scope", "sample_size", "n_cases", "n_controls",
-            "assigned_ancestry", "ancestry_assignment_method", "original_effect_scale",
-            "original_sd", "original_sd_method",
-            *(column for column in row if column.startswith("ancestry_prop_")),
-        )
-        for column in metadata_columns:
-            if store_row.get(column, "") != row.get(column, ""):
-                warnings.append(
-                    f"{row['analysis_id']}: built {column}={store_row.get(column)!r} "
-                    f"!= manifest {row.get(column)!r}"
-                )
+    failures.extend(metadata_mismatch_errors(rows, store_by_id))
 
     report_path = release_dir / "sidecars" / "build_report.tsv"
     report_path.parent.mkdir(parents=True, exist_ok=True)
@@ -230,9 +238,7 @@ def main() -> None:
         writer.writeheader()
         writer.writerow(report)
 
-    build_status = "failed" if not store_validation.ok else (
-        "passed_with_warnings" if warnings else "passed"
-    )
+    build_status = "failed" if failures else "passed"
     merge_validation_yaml(
         release_dir / "validation.yaml",
         validator_name="resources/generators/opengwas-gwas-vcf-dense/build-store.py",
@@ -243,9 +249,11 @@ def main() -> None:
             "store": build_status,
         },
         updated_reports={"build_report": str(report_path.relative_to(release_dir))},
-        new_warnings=warnings,
+        new_warnings=failures,
     )
     print(json.dumps(report, indent=2, sort_keys=True, default=str))
+    if failures:
+        raise SystemExit("Store build validation failed:\n" + "\n".join(failures))
 
 
 if __name__ == "__main__":

@@ -1,10 +1,10 @@
 status: failed
-validated_at: 2026-08-18T10:24:44.644082+00:00
+validated_at: 2026-08-18T10:36:13.731485+00:00
 validator:
   name: resources/generators/finngen-r13-dense/assess.py
   version: null
 build_environment:
-  repo_commit: 6a66cbc7e096adfdeb4fc0bfddabb43094a066a5
+  repo_commit: 61043c83662dc5588f2c4ed9ea46ff7e2055bf78
   opengwasdb_version: 0.1.0
   opengwasdb_commit: b2ad3381528d43da9c8d68453861265e1ccb3114
   pixi_lock_sha256: 9cda82eee1ec8a7557b6788265508545c007d2a5ba38e4f67d2f89b05996e820

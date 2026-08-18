@@ -58,6 +58,9 @@ def main() -> None:
         no_go_reasons.append(f"built Analysis count is {n_analyses}, not 20")
     if not query_ok:
         no_go_reasons.append("binary and quantitative query probes were not both finite")
+    for check, status in checks.items():
+        if status in {"failed", "not_run"}:
+            no_go_reasons.append(f"required release check {check}={status}")
     if failed_sd:
         no_go_reasons.append(
             "effect-scale evidence failed for " + ", ".join(failed_sd)

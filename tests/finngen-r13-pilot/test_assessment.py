@@ -83,7 +83,40 @@ def main() -> None:
         assert report.rstrip().endswith("Recommendation: **NO-GO**")
         validation = (release / "validation.yaml").read_text(encoding="utf-8")
         assert "pilot_assessment: pilot_report.md" in validation
-    print("ALL 6 CHECKS PASSED")
+
+        # A failed required release check blocks GO even when Store, probes,
+        # and scientific SD evidence are otherwise clean.
+        write_tsv(
+            release / "sidecars" / "sd_estimation.tsv",
+            [
+                {"analysis_id": "finngen-r13-BMI_IRN", "status": "passed"},
+                {"analysis_id": "finngen-r13-HEIGHT_IRN", "status": "passed"},
+                {"analysis_id": "finngen-r13-WEIGHT_IRN", "status": "passed"},
+            ],
+        )
+        (release / "validation.yaml").write_text(
+            "checks:\n  schema: failed\n  files: passed\n  effect_scale: passed\n"
+            "  store: passed\nreports:\n  build_report: sidecars/build_report.tsv\n"
+            "warnings: []\nerrors:\n  - shared schema rejected the manifest\n",
+            encoding="utf-8",
+        )
+        failed_check = subprocess.run(
+            [
+                sys.executable,
+                "resources/generators/finngen-r13-dense/assess.py",
+                f"--release-dir={release}",
+                "--full-analysis-count=2754",
+            ],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        assert failed_check.returncode == 0, failed_check.stdout + failed_check.stderr
+        failed_report = (release / "pilot_report.md").read_text(encoding="utf-8")
+        assert "required release check schema=failed" in failed_report
+        assert failed_report.rstrip().endswith("Recommendation: **NO-GO**")
+    print("ALL 9 CHECKS PASSED")
 
 
 if __name__ == "__main__":

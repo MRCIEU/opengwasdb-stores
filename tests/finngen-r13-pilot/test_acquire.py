@@ -114,11 +114,71 @@ def main() -> None:
             assert second.returncode == 0, second.stdout + second.stderr
             assert target.stat().st_mtime_ns == before
             assert read_rows(release / "sidecars" / "downloads.tsv")[0]["status"] == "cached"
+
+            # A targeted retry must update its row without erasing evidence
+            # for other Analyses already present in the release sidecar.
+            analyses = read_rows(release / "analyses.tsv")
+            second_target = source_dir / "finngen_R13_SECOND.gz"
+            second_target.write_bytes(payload)
+            analyses.append({
+                **analyses[0],
+                "analysis_id": "finngen-r13-SECOND",
+                "source_file": str(second_target),
+            })
+            with (release / "analyses.tsv").open("w", newline="", encoding="utf-8") as handle:
+                writer = csv.DictWriter(handle, fieldnames=columns, delimiter="\t", lineterminator="\n")
+                writer.writeheader()
+                writer.writerows(analyses)
+            downloads_path = release / "sidecars" / "downloads.tsv"
+            downloads = read_rows(downloads_path)
+            downloads.append({
+                **downloads[0],
+                "analysis_id": "finngen-r13-SECOND",
+                "source_file": str(second_target),
+            })
+            with downloads_path.open("w", newline="", encoding="utf-8") as handle:
+                writer = csv.DictWriter(
+                    handle, fieldnames=list(downloads[0]), delimiter="\t", lineterminator="\n"
+                )
+                writer.writeheader()
+                writer.writerows(downloads)
+            targeted = subprocess.run(
+                [*command, "--only-analysis-id=finngen-r13-FIXTURE"],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            assert targeted.returncode == 0, targeted.stdout + targeted.stderr
+            assert [row["analysis_id"] for row in read_rows(downloads_path)] == [
+                "finngen-r13-FIXTURE",
+                "finngen-r13-SECOND",
+            ]
+
+            # A checksum already pinned by the manifest is an expectation,
+            # never a field the newly downloaded bytes may overwrite.
+            analyses = read_rows(release / "analyses.tsv")
+            analyses[0]["checksum"] = "0" * 64
+            with (release / "analyses.tsv").open("w", newline="", encoding="utf-8") as handle:
+                writer = csv.DictWriter(handle, fieldnames=columns, delimiter="\t", lineterminator="\n")
+                writer.writeheader()
+                writer.writerows(analyses)
+            target.unlink()
+            mismatch = subprocess.run(
+                [*command, "--only-analysis-id=finngen-r13-FIXTURE"],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            assert mismatch.returncode != 0
+            assert not target.exists()
+            assert read_rows(release / "analyses.tsv")[0]["checksum"] == "0" * 64
     finally:
         server.shutdown()
         server.server_close()
         thread.join()
-    print("ALL 13 CHECKS PASSED")
+    print("ALL 18 CHECKS PASSED")
 
 
 if __name__ == "__main__":

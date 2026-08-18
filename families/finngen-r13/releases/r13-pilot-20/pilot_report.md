@@ -29,6 +29,8 @@
 
 Blocking reasons:
 
+- required release check effect_scale=failed
+- required release check sd_estimation=failed
 - effect-scale evidence failed for finngen-r13-HEIGHT_IRN
 
 The native FinnGen build/query path is operational, but the complete R13 collection should not be onboarded until the blocking evidence is resolved.

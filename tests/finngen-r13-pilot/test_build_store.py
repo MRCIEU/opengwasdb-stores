@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import gzip
+import importlib.util
 import math
 import subprocess
 import sys
@@ -14,6 +15,15 @@ from opengwasdb.query import query_store
 from opengwasdb.validation import validate_store
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def load_build_module() -> object:
+    path = ROOT / "resources/generators/opengwas-gwas-vcf-dense/build-store.py"
+    spec = importlib.util.spec_from_file_location("dense_build_store", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def write_finngen(path: Path, *, beta: float, se: float) -> None:
@@ -193,7 +203,15 @@ artifacts:
         validation_text = (release / "validation.yaml").read_text(encoding="utf-8")
         assert "reader_smoke_test: passed" in validation_text
         assert "store: passed" in validation_text
-    print("ALL 28 CHECKS PASSED")
+
+    build_module = load_build_module()
+    mismatch_errors = build_module.metadata_mismatch_errors(  # type: ignore[attr-defined]
+        [{"analysis_id": "fixture", "stored_effect_scale": "log_or", "n_cases": "100"}],
+        {"fixture": {"stored_effect_scale": "log_or", "n_cases": ""}},
+    )
+    assert mismatch_errors
+    assert "n_cases" in mismatch_errors[0]
+    print("ALL 30 CHECKS PASSED")
 
 
 if __name__ == "__main__":

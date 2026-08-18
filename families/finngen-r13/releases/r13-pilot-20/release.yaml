@@ -22,7 +22,7 @@ generator:
   command: Rscript resources/generators/finngen-r13-dense/generate.R --config=families/finngen-r13/generators/config-pilot-20.yaml
     --mode=emit
 build_environment:
-  repo_commit: 6a66cbc7e096adfdeb4fc0bfddabb43094a066a5
+  repo_commit: 61043c83662dc5588f2c4ed9ea46ff7e2055bf78
   pixi_lock_sha256: 9cda82eee1ec8a7557b6788265508545c007d2a5ba38e4f67d2f89b05996e820
   pixi_environment: default
   platform: x86_64-conda-linux-gnu
