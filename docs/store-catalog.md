@@ -15,8 +15,9 @@ artifacts themselves live outside this repository under
 └── metabolome-plasma-2023   -> /data/opengwasdb/metabolome-plasma-2023
 ```
 
-See [`query-walkthrough.html`](query-walkthrough.html) for real `opengwasdb`
-query calls (and their actual output) against each of the four stores below.
+New to these stores? [`query-walkthrough.html`](query-walkthrough.html) is a
+hands-on command-line tour of all four -- what a store contains, the
+`opengwasdb query-*` commands, and worked examples with real output.
 
 The symlinks are a convenience for browsing only -- every registry
 `artifacts.store_uri`/`artifact_root` path still points at the real location

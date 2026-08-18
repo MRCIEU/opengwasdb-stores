@@ -45,6 +45,7 @@
   .card p{margin:0;color:var(--ink-2);font-size:14.5px;max-width:60ch}
   .tag{font-size:11px;font-weight:650;text-transform:uppercase;letter-spacing:.04em;
     padding:2px 8px;border-radius:20px;color:#fff}
+  .card.walkthrough{border-left-color:var(--dense)}
   .tag.report{background:var(--dense)} .tag.tool{background:var(--hybrid)} .tag.analysis{background:var(--ragged)}
   footer{margin-top:44px;padding-top:20px;border-top:1px solid var(--border);
     color:var(--ink-3);font-size:13px}
@@ -63,6 +64,16 @@
   </p>
 
   <div class="cards">
+    <a class="card walkthrough" href="query-walkthrough.html">
+      <h2>Getting started with stores <span class="tag report">guide</span> <span class="go">Open →</span></h2>
+      <p>
+        Start here if you've never opened a store. A hands-on command-line tour
+        of the four pilot stores — what a store contains, the five
+        <code>opengwasdb query-*</code> commands, how to turn their output into
+        readable tables, and the gotchas that catch everyone first time.
+      </p>
+    </a>
+
     <a class="card curation" href="store-curation.html">
       <h2>Store curation report <span class="tag report">report</span> <span class="go">Open →</span></h2>
       <p>
