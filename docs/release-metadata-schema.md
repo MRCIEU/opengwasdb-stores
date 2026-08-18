@@ -310,7 +310,7 @@ to the release.
 |---|---:|---|
 | `store_family_id` | Yes | Store Family ID. |
 | `family_release_id` | Yes | Release ID. |
-| `store_layout` | Yes | `dense-observed`, `dense-reference-completed`, `ragged-observed`, or `ragged-reference-completed`. |
+| `store_layout` | Yes | `dense-observed`, `dense-reference-completed`, `ragged-observed`, `ragged-reference-completed`, `hybrid-observed`, or `hybrid-reference-completed`. |
 | `completion_state` | Yes | `observed-only` or `reference-completed`. |
 | `builder.package` | Yes | Package that owns the builder. Usually `opengwasdb`. |
 | `builder.entrypoint` | Yes | Importable builder entry point. |
@@ -318,6 +318,7 @@ to the release.
 | `source.source_reader_capability` | Yes | OpenGWASDB reader capability for the Source Collection. |
 | `normalisation.target_reference_assembly` | Yes | Target reference assembly for stored coordinates. |
 | `normalisation.liftover` | Optional | Liftover policy or chain when source and target assemblies differ. |
+| `normalisation.source_assembly` | Optional | Declared source assembly (`hg19` or `hg38`) for opengwasdb's Dense/Hybrid VCF-manifest builders (opengwasdb#84/#85). Sources already on the target assembly (for example harmonised GWAS-SSF, GRCh38) declare `hg38` so the builder skips liftover instead of silently re-lifting and mispositioning already-correct coordinates. Omit for `hg19` GWAS-VCF sources, which is the builder's default. |
 | `effects.stored_effect_scale` | Yes | Stored effect scale for the build: `sd`, `log_or`, or `log_hazard`. |
 | `shape.association_coverage` | Yes | Repeats the release association coverage for builder convenience. |
 | `shape.ragged_region_policy` | Optional | Named sparse-region policy for ragged releases. |
@@ -340,7 +341,7 @@ effect-scale validation should declare at least:
 | Field | Required | Description |
 |---|---:|---|
 | `resource_id` | Yes | Stable ID for this Reference Resource, referenced from `effect_scale_validation.reference_resources` or `ancestry_assignment.reference_resources`. |
-| `kind` | Yes | `reference_af` for single-ancestry allele-frequency lookup resources used by effect-scale validation; `ancestry_mixture` for multi-ancestry mixture-frequency resources used by AF-based ancestry assignment (issue #23); `qc_panel` for the fixed QC variant panel unconditionally retained regardless of significance (issue #28/#29); `trait_ontology_mapping` for a curated trait-label-to-ontology-term lookup used by Trait Ontology Mapping resolution; other kinds (for example LD panels) may reuse the same declaration shape. |
+| `kind` | Yes | `reference_af` for single-ancestry allele-frequency lookup resources used by effect-scale validation; `ancestry_mixture` for multi-ancestry mixture-frequency resources used by AF-based ancestry assignment (issue #23); `qc_panel` for the fixed QC variant panel unconditionally retained regardless of significance (issue #28/#29); `trait_ontology_mapping` for a curated trait-label-to-ontology-term lookup used by Trait Ontology Mapping resolution; `hybrid_dense_panel` for a Hybrid release's Dense Component reference panel (the fixed variant set `opengwasdb.layouts.hybrid.build.read_reference_panel_alids` partitions on-panel/off-panel against); other kinds (for example LD panels) may reuse the same declaration shape. |
 | `ancestry` | Yes for `reference_af` | Ancestry/population label the resource represents, matching the controlled `assigned_ancestry` vocabulary. For `ancestry_mixture` resources, which cover multiple super-populations at once, use `ancestry: multi` and list the covered super-populations in `super_populations` instead. Not applicable for `trait_ontology_mapping`. |
 | `super_populations` | Yes for `ancestry_mixture` | List of super-population labels the mixture reference can assign to (for example `AFR, AMR, EAS, EUR, MID, NAF, SAS`). |
 | `genome_build` | Yes, except `trait_ontology_mapping` | Genome build of the resource's coordinates. Not applicable for `trait_ontology_mapping`, which has no genomic coordinates. |

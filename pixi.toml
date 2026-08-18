@@ -42,6 +42,17 @@ threadpoolctl = ">=3.0"
 # `opengwasdb.finngen-r13` Source Reader Capability and assembly-aware Dense
 # build path used by the FinnGen R13 pilot without dropping its metadata.
 #
+# Previously bumped for opengwasdb-stores#68 (GWAS-Catalog-SSF -> Hybrid
+# generator): explodecomputer/opengwasdb#84 registers a GWAS-SSF SourceReader
+# capability (opengwasdb.gwas-ssf) so build_hybrid_from_vcf_manifest can
+# consume harmonised GWAS-SSF sources, not just GWAS-VCF; #85 fixes a real bug
+# that capability exposed -- Dense/Hybrid's VCF-manifest builders hardcoded
+# hg19->hg38 liftover unconditionally, silently re-lifting (and mispositioning)
+# an already-GRCh38 GWAS-SSF source. Both land as an optional per-row manifest
+# column (source_reader_capability, source_assembly) that every existing
+# manifest omits and is therefore unaffected by. (This bump's target commit is
+# an ancestor of the current pin above, so both remain true of it.)
+#
 # Previously bumped for issue #63/opengwasdb#74: explodecomputer/opengwasdb#64 ("Unify
 # analyses.tsv across every layout; retire phenotype_id; add Attribution
 # Metadata", ADR 0034) landed as opengwasdb#75-#78. This pin is opengwasdb's
