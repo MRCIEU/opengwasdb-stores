@@ -36,7 +36,13 @@ threadpoolctl = ">=3.0"
 # environment) if pysam is also pinned via conda, so it is left for pip/uv to
 # resolve as a transitive PyPI dependency of opengwasdb itself.
 #
-# Bumped for issue #63/opengwasdb#74: explodecomputer/opengwasdb#64 ("Unify
+# Bumped for issues #61/#62/#66 after explodecomputer/opengwasdb#48 landed
+# in PR #87 and opengwasdb#86 added shared Analytical Metadata passthrough.
+# This immutable commit provides the native
+# `opengwasdb.finngen-r13` Source Reader Capability and assembly-aware Dense
+# build path used by the FinnGen R13 pilot without dropping its metadata.
+#
+# Previously bumped for issue #63/opengwasdb#74: explodecomputer/opengwasdb#64 ("Unify
 # analyses.tsv across every layout; retire phenotype_id; add Attribution
 # Metadata", ADR 0034) landed as opengwasdb#75-#78. This pin is opengwasdb's
 # main HEAD at the time of the bump. Note opengwasdb.model.analyses's
@@ -52,7 +58,7 @@ threadpoolctl = ">=3.0"
 # (validate_analyses(), to_json_schema()) -- the shared core schema this
 # registry's checks.schema validates emitted manifests against, replacing
 # this repository's hand-rolled per-generator column-name checks.
-opengwasdb = { git = "https://github.com/explodecomputer/opengwasdb", rev = "f0e4bf74e3ca0d4c0fb88ff554d631bfda9f0f5b" }
+opengwasdb = { git = "https://github.com/explodecomputer/opengwasdb", rev = "b2ad3381528d43da9c8d68453861265e1ccb3114" }
 
 [feature.r.dependencies]
 r-base = ">=4.3"

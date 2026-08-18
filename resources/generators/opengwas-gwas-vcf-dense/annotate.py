@@ -1,25 +1,45 @@
 #!/usr/bin/env python3
-"""One-pass AF-based ancestry and phenotype-SD annotation for dense GWAS-VCF releases."""
+"""One-pass AF-based ancestry and phenotype-SD annotation for dense releases."""
 from __future__ import annotations
 
 import argparse
 import csv
 import gzip
 import math
+import sys
 import tempfile
+from collections.abc import Mapping, Sequence
+from concurrent.futures import ProcessPoolExecutor
+from dataclasses import dataclass
+from functools import cache
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
+from typing import Any
 
 import numpy as np
-
-from opengwasdb.ancestry import Gates, assign_ancestry, load_reference
+from opengwasdb.ancestry import (
+    AncestryReference,
+    Gates,
+    assign_ancestry,
+    load_reference,
+)
 from opengwasdb.build.phenotype_sd import estimate_phenotype_sd
-from opengwasdb.model.enums import OriginalSdMethod
-from opengwasdb.readers import GwasVcfReader, load_liftover, write_regions_file
+from opengwasdb.model.enums import OriginalSdMethod, StoredEffectScale
+from opengwasdb.readers import (
+    GWAS_VCF_CAPABILITY,
+    GwasVcfReader,
+    load_liftover,
+    resolve_reader,
+    write_regions_file,
+)
 
-import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-from resources.lib.release_yaml import get, merge_validation_yaml, read_release_yaml, resolve_path  # noqa: E402
+from resources.lib.release_yaml import (  # noqa: E402
+    get,
+    merge_validation_yaml,
+    read_release_yaml,
+    resolve_path,
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -27,6 +47,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--release-dir", required=True)
     parser.add_argument("--only-analysis-id", default="")
     parser.add_argument("--source-dir", default="", help="Override source_file by analysis_id.vcf.gz")
+    parser.add_argument("--workers", type=int, default=1)
     return parser.parse_args()
 
 
@@ -35,7 +56,9 @@ def read_tsv(path: Path) -> list[dict[str, str]]:
         return list(csv.DictReader(fh, delimiter="\t"))
 
 
-def write_tsv(path: Path, rows: list[dict[str, object]], columns: list[str]) -> None:
+def write_tsv(
+    path: Path, rows: Sequence[Mapping[str, object]], columns: list[str]
+) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="", encoding="utf-8") as fh:
         writer = csv.DictWriter(fh, fieldnames=columns, delimiter="\t", lineterminator="\n")
@@ -102,8 +125,163 @@ def overall_check(statuses: list[str]) -> str:
     return "passed"
 
 
+@dataclass(frozen=True)
+class AnnotationContext:
+    reference: AncestryReference
+    gates: Gates
+    source_dir: str
+    default_capability: str
+    chromosome: str
+    regions_file: str
+    chain_file: str
+    effect_cfg: dict[str, Any]
+    resource_id: str
+    maf_floor: float
+    estimator_version: str
+
+
+@dataclass(frozen=True)
+class AnnotationResult:
+    row: dict[str, str]
+    ancestry_row: dict[str, object]
+    sd_row: dict[str, object]
+    ancestry_status: str
+    sd_status: str
+    warnings: list[str]
+
+
+@cache
+def cached_liftover(chain_file: str) -> object:
+    return load_liftover(chain_file=chain_file)
+
+
+def annotate_one(row: dict[str, str], context: AnnotationContext) -> AnnotationResult:
+    """Annotate one Analysis in one AF/SE extraction pass."""
+    row = dict(row)
+    source_path = (
+        Path(context.source_dir) / f"{row['analysis_id']}.vcf.gz"
+        if context.source_dir else Path(row["source_file"])
+    )
+    if not source_path.exists():
+        raise FileNotFoundError(f"Source artifact does not exist: {source_path}")
+    capability = row.get("source_reader_capability") or context.default_capability
+    scale = StoredEffectScale(row["stored_effect_scale"])
+    liftover = cached_liftover(context.chain_file) if context.chain_file else None
+    if capability == GWAS_VCF_CAPABILITY:
+        reader = GwasVcfReader(
+            source_path,
+            stored_effect_scale=scale,
+            liftover=liftover,
+            regions_file=Path(context.regions_file) if context.regions_file else None,
+            region=context.chromosome if liftover is not None else None,
+        )
+    else:
+        if liftover is not None:
+            raise ValueError(
+                f"Source Reader Capability {capability!r} cannot use the GWAS-VCF "
+                "annotation liftover path"
+            )
+        reader = resolve_reader(capability, source_path, scale)
+    metrics = reader.extract_at_sites(context.reference.index.keys())
+    study_af = {alid: metric.af for alid, metric in metrics.items()}
+    assignment = assign_ancestry(study_af, context.reference, context.gates)
+    ancestry_status = "passed" if assignment.gate_reason == "ok" else "warning"
+    assigned = assignment.assigned_ancestry or ""
+    row["assigned_ancestry"] = assigned
+    row["ancestry_assignment_method"] = "af_assigned" if assigned else "unassigned"
+    warnings = []
+    if not assigned:
+        warnings.append(f"{row['analysis_id']}: ancestry gate failed ({assignment.gate_reason})")
+    ancestry_row: dict[str, object] = {
+        "analysis_id": row["analysis_id"],
+        "source_analysis_id": row.get("source_analysis_id", row["analysis_id"]),
+        "source_ancestry_label": row.get("source_ancestry_label", ""),
+        "assigned_ancestry": assigned,
+        "ancestry_assignment_method": row["ancestry_assignment_method"],
+        "ancestry_reference_id": context.resource_id,
+        "af_overlap": assignment.af_overlap,
+        "dominant_superpop": assignment.dominant_superpop or "",
+        "dominant_proportion": assignment.dominant_proportion,
+        "runner_up_margin": assignment.runner_up_margin,
+        "nnls_residual": assignment.residual,
+        "gate_reason": assignment.gate_reason,
+        "source_assigned_mismatch": "",
+        "ancestry_notes": f"one-pass {capability} AF/SE extraction",
+    }
+    for superpop in context.reference.superpops:
+        column = f"ancestry_prop_{superpop}"
+        proportion = assignment.superpop_composition.get(superpop, 0.0)
+        ancestry_row[column] = proportion
+        # The sidecar records the assignment evidence; the Release Manifest
+        # must carry the same composition so the Store builder can preserve it
+        # as Analytical Metadata.
+        row[column] = str(proportion)
+
+    scale_value = row.get("stored_effect_scale", "")
+    sample_size = finite_float(row.get("sample_size", ""))
+    if scale_value in {"log_or", "log_hazard"}:
+        sd_status, skip_reason, estimate = "skipped", "non_quantitative_effect_scale", None
+    elif sample_size is None or not metrics:
+        sd_status, skip_reason, estimate = "skipped", "no_usable_site_metrics", None
+    else:
+        af = np.asarray([metric.af for metric in metrics.values()], dtype=float)
+        se = np.asarray([metric.se for metric in metrics.values()], dtype=float)
+        estimate = estimate_phenotype_sd(
+            OriginalSdMethod.ESTIMATED_FROM_SOURCE_MAF, sample_size, se=se, af=af
+        )
+        min_sites = int(context.effect_cfg.get("min_overlap_variants", 20))
+        if estimate.method is OriginalSdMethod.UNAVAILABLE or len(metrics) < min_sites:
+            sd_status, skip_reason = "skipped", "low_overlap"
+        elif row.get("original_sd_method") == "declared_standardised":
+            tolerance = float(context.effect_cfg.get("sd_tolerance", 0.15))
+            delta = abs(estimate.sd - 1.0)
+            sd_status = (
+                "passed" if delta <= tolerance
+                else "warning" if delta <= tolerance * 2
+                else "failed"
+            )
+            skip_reason = ""
+        else:
+            sd_status, skip_reason = "passed", ""
+            row["original_sd"] = str(estimate.sd)
+            row["original_sd_method"] = estimate.method.value
+    if sd_status in {"warning", "failed"}:
+        warnings.append(f"{row['analysis_id']}: empirical effect-scale status={sd_status}")
+    sd_row = {
+        "analysis_id": row["analysis_id"],
+        "source_analysis_id": row.get("source_analysis_id", row["analysis_id"]),
+        "status": sd_status,
+        "skip_reason": skip_reason,
+        "af_source": "source" if estimate else "",
+        "ancestry_reference_id": "",
+        "original_sd": row.get("original_sd", ""),
+        "original_sd_method": row.get("original_sd_method", ""),
+        "n_variants_considered": context.reference.n_variants,
+        "n_variants_overlapping": len(metrics),
+        "n_variants_excluded_ambiguous": "",
+        "n_variants_excluded_mismatch": "",
+        "n_variants_excluded_missing_af": context.reference.n_variants - len(metrics),
+        "n_variants_excluded_maf": 0,
+        "n_variants_retained": len(metrics),
+        "maf_min": context.maf_floor,
+        "maf_max": 0.5,
+        "implied_sd_median": estimate.sd if estimate else "",
+        "sd_dispersion": estimate.dispersion if estimate else "",
+        "sd_notes": (estimate.notes or "one-pass source-AF estimate") if estimate else skip_reason,
+        "estimator_version": context.estimator_version,
+    }
+    print(
+        f"{row['analysis_id']}: ancestry={ancestry_status} effect_scale={sd_status} "
+        f"overlap={len(metrics)}",
+        flush=True,
+    )
+    return AnnotationResult(row, ancestry_row, sd_row, ancestry_status, sd_status, warnings)
+
+
 def main() -> None:
     args = parse_args()
+    if args.workers < 1:
+        raise SystemExit("--workers must be at least 1")
     release_dir = Path(args.release_dir).resolve()
     build = read_release_yaml(release_dir / "build.yaml")
     ancestry_cfg = get(build, "ancestry_assignment", default={})
@@ -122,13 +300,14 @@ def main() -> None:
     reference_path = resolve_path(root, str(resource["location"]))
     groups_path = resolve_path(root, str(resource["fine_group_map"]))
 
-    gates_cfg = ancestry_cfg.get("gates") if isinstance(ancestry_cfg.get("gates"), dict) else {}
+    raw_gates_cfg = ancestry_cfg.get("gates")
+    gates_cfg: dict[str, Any] = raw_gates_cfg if isinstance(raw_gates_cfg, dict) else {}
     gates = Gates(
         tau=float(gates_cfg.get("tau", 0.50)), delta=float(gates_cfg.get("delta", 0.20)),
         n_min=int(gates_cfg.get("n_min", 5000)), residual_max=float(gates_cfg.get("residual_max", 0.06)),
     )
     chain = get(build, "normalisation", "liftover_chain", default=None)
-    liftover = load_liftover(chain_file=str(resolve_path(root, str(chain)))) if chain else None
+    chain_file = str(resolve_path(root, str(chain))) if chain else ""
 
     analyses_path = release_dir / "analyses.tsv"
     analyses = read_tsv(analyses_path)
@@ -142,95 +321,42 @@ def main() -> None:
     except PackageNotFoundError:
         estimator_version = "opengwasdb:unknown"
 
-    ancestry_rows: list[dict[str, object]] = []
-    sd_rows: list[dict[str, object]] = []
-    ancestry_statuses: list[str] = []
-    sd_statuses: list[str] = []
-    warnings: list[str] = []
-
     with tempfile.TemporaryDirectory() as tmp:
         subset_path = Path(tmp) / "ancestry-reference-subset.tsv"
         make_reference_subset(reference_path, subset_path, chromosome, max_sites)
         reference = load_reference(subset_path, groups_path, maf_floor=maf_floor)
-        regions_file = None
-        if liftover is None:
-            regions_file = write_regions_file(reference.index.keys(), Path(tmp) / "regions.tsv")
+        regions_file = (
+            "" if chain_file
+            else str(write_regions_file(reference.index.keys(), Path(tmp) / "regions.tsv"))
+        )
+        context = AnnotationContext(
+            reference=reference,
+            gates=gates,
+            source_dir=str(Path(args.source_dir).resolve()) if args.source_dir else "",
+            default_capability=str(
+                get(build, "source", "source_reader_capability", default=GWAS_VCF_CAPABILITY)
+            ),
+            chromosome=chromosome,
+            regions_file=regions_file,
+            chain_file=chain_file,
+            effect_cfg=effect_cfg,
+            resource_id=resource_id,
+            maf_floor=maf_floor,
+            estimator_version=estimator_version,
+        )
+        if args.workers == 1:
+            results = [annotate_one(row, context) for row in selected]
+        else:
+            with ProcessPoolExecutor(max_workers=args.workers) as executor:
+                results = list(executor.map(annotate_one, selected, [context] * len(selected)))
 
-        for row in selected:
-            source_path = (
-                Path(args.source_dir).resolve() / f"{row['analysis_id']}.vcf.gz"
-                if args.source_dir else Path(row["source_file"])
-            )
-            if not source_path.exists():
-                raise SystemExit(f"Source VCF does not exist: {source_path}")
-            reader = GwasVcfReader(
-                source_path, liftover=liftover, regions_file=regions_file,
-                region=chromosome if liftover is not None else None,
-            )
-            metrics = reader.extract_at_sites(reference.index.keys())
-            study_af = {alid: metric.af for alid, metric in metrics.items()}
-            assignment = assign_ancestry(study_af, reference, gates)
-            ancestry_status = "passed" if assignment.gate_reason == "ok" else "warning"
-            ancestry_statuses.append(ancestry_status)
-            assigned = assignment.assigned_ancestry or ""
-            row["assigned_ancestry"] = assigned
-            row["ancestry_assignment_method"] = "af_assigned" if assigned else "unassigned"
-            if not assigned:
-                warnings.append(f"{row['analysis_id']}: ancestry gate failed ({assignment.gate_reason})")
-            ancestry_row: dict[str, object] = {
-                "analysis_id": row["analysis_id"], "source_analysis_id": row.get("source_analysis_id", row["analysis_id"]),
-                "source_ancestry_label": row.get("source_ancestry_label", ""), "assigned_ancestry": assigned,
-                "ancestry_assignment_method": row["ancestry_assignment_method"], "ancestry_reference_id": resource_id,
-                "af_overlap": assignment.af_overlap, "dominant_superpop": assignment.dominant_superpop or "",
-                "dominant_proportion": assignment.dominant_proportion, "runner_up_margin": assignment.runner_up_margin,
-                "nnls_residual": assignment.residual, "gate_reason": assignment.gate_reason,
-                "source_assigned_mismatch": "", "ancestry_notes": "one-pass GWAS-VCF AF/SE extraction",
-            }
-            for superpop in reference.superpops:
-                ancestry_row[f"ancestry_prop_{superpop}"] = assignment.superpop_composition.get(superpop, 0.0)
-            ancestry_rows.append(ancestry_row)
-
-            scale = row.get("stored_effect_scale", "")
-            sample_size = finite_float(row.get("sample_size", ""))
-            if scale in {"log_or", "log_hazard"}:
-                sd_status, skip_reason, estimate = "skipped", "non_quantitative_effect_scale", None
-            elif sample_size is None or not metrics:
-                sd_status, skip_reason, estimate = "skipped", "no_usable_site_metrics", None
-            else:
-                af = np.asarray([metric.af for metric in metrics.values()], dtype=float)
-                se = np.asarray([metric.se for metric in metrics.values()], dtype=float)
-                estimate = estimate_phenotype_sd(
-                    OriginalSdMethod.ESTIMATED_FROM_SOURCE_MAF, sample_size, se=se, af=af
-                )
-                min_sites = int(effect_cfg.get("min_overlap_variants", 20))
-                if estimate.method is OriginalSdMethod.UNAVAILABLE or len(metrics) < min_sites:
-                    sd_status, skip_reason = "skipped", "low_overlap"
-                elif row.get("original_sd_method") == "declared_standardised":
-                    tolerance = float(effect_cfg.get("sd_tolerance", 0.15))
-                    delta = abs(estimate.sd - 1.0)
-                    sd_status = "passed" if delta <= tolerance else "warning" if delta <= tolerance * 2 else "failed"
-                    skip_reason = ""
-                else:
-                    sd_status, skip_reason = "passed", ""
-                    row["original_sd"] = str(estimate.sd)
-                    row["original_sd_method"] = estimate.method.value
-            sd_statuses.append(sd_status)
-            if sd_status in {"warning", "failed"}:
-                warnings.append(f"{row['analysis_id']}: empirical effect-scale status={sd_status}")
-            sd_rows.append({
-                "analysis_id": row["analysis_id"], "source_analysis_id": row.get("source_analysis_id", row["analysis_id"]),
-                "status": sd_status, "skip_reason": skip_reason, "af_source": "source" if estimate else "",
-                "ancestry_reference_id": "", "original_sd": row.get("original_sd", ""),
-                "original_sd_method": row.get("original_sd_method", ""), "n_variants_considered": reference.n_variants,
-                "n_variants_overlapping": len(metrics), "n_variants_excluded_ambiguous": "",
-                "n_variants_excluded_mismatch": "", "n_variants_excluded_missing_af": reference.n_variants - len(metrics),
-                "n_variants_excluded_maf": 0, "n_variants_retained": len(metrics),
-                "maf_min": maf_floor, "maf_max": 0.5,
-                "implied_sd_median": estimate.sd if estimate else "",
-                "sd_dispersion": estimate.dispersion if estimate else "",
-                "sd_notes": estimate.notes or "one-pass source-AF estimate" if estimate else skip_reason,
-                "estimator_version": estimator_version,
-            })
+    updated_by_id = {result.row["analysis_id"]: result.row for result in results}
+    analyses = [updated_by_id.get(row["analysis_id"], row) for row in analyses]
+    ancestry_rows = [result.ancestry_row for result in results]
+    sd_rows = [result.sd_row for result in results]
+    ancestry_statuses = [result.ancestry_status for result in results]
+    sd_statuses = [result.sd_status for result in results]
+    warnings = [warning for result in results for warning in result.warnings]
 
     write_tsv(analyses_path, analyses, list(analyses[0].keys()))
     ancestry_columns = list(ancestry_rows[0].keys())

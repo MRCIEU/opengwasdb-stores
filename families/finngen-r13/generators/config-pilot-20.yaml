@@ -1,0 +1,66 @@
+store_family_id: finngen-r13
+family_release_id: r13-pilot-20
+source_collection_id: finngen-r13
+release_kind: one-off
+association_coverage: full_gwas
+description: >
+  Bounded FinnGen R13 onboarding trial containing all three inverse-rank-normalised
+  quantitative endpoints and 17 case-control endpoints selected
+  deterministically across distinct manifest categories. This is not the full
+  FinnGen collection.
+notes: >
+  Quantitative endpoints are ordered by phenocode. For each binary category,
+  the endpoint with the largest case count wins (phenocode breaks ties); the
+  17 category winners with the largest case counts are retained (category and
+  phenocode break ties). The frozen provider manifest checksum makes the
+  resulting 20-Analysis order reproducible.
+
+source:
+  source_snapshot_id: finngen-r13-manifest-2026-05-12
+  manifest_path: /data/opengwasdb/finngen-r13/releases/r13-pilot-20/manifest/finngen_R13_manifest.tsv
+  manifest_url: https://storage.googleapis.com/finngen-public-data-r13/summary_stats/finngen_R13_manifest.tsv
+  manifest_sha256: c9caafa9b98ee5ef050a705766bd1c451fc2154fb8e81b069022012a2f75ae20
+  manifest_etag: a70f4ecb57acf7c23e8f5d71be11d936
+  manifest_last_modified: 2026-05-12T12:48:15Z
+
+defaults:
+  source_genome_build: GRCh38
+  license: FinnGen public data
+
+selection:
+  binary_count: 17
+
+reference_resources:
+  - resource_id: hgdp1kgp-ancestry-mixture-hg38
+    kind: ancestry_mixture
+    genome_build: GRCh38
+    location: /data/opengwasdb/reference/ancestry-mixture/ref_freqs.hg38.tsv.gz
+    fine_group_map: /data/opengwasdb/reference/ancestry-mixture/ancestry_groups.tsv
+
+ancestry_assignment:
+  enabled: true
+  reference_resource_id: hgdp1kgp-ancestry-mixture-hg38
+  sampling_chromosome: 1
+  max_reference_sites: 20000
+  maf_floor: 0.01
+  gates:
+    tau: 0.50
+    delta: 0.20
+    n_min: 5000
+    residual_max: 0.06
+
+effect_scale_validation:
+  enabled: true
+  min_overlap_variants: 20
+  sd_tolerance: 0.15
+
+output:
+  release_dir: families/finngen-r13/releases/r13-pilot-20
+  artifact_root: /data/opengwasdb
+  artifact_subdir: finngen-r13/releases/r13-pilot-20
+  planned_store_uri: /data/opengwasdb/finngen-r13/releases/r13-pilot-20/store.opengwasdb
+
+build_notes: >
+  Build directly from the frozen 20-row Release Manifest through the native
+  opengwasdb.finngen-r13 Source Reader Capability. Source and target assembly
+  are GRCh38, so no format conversion or liftover is used.

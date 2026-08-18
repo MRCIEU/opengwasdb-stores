@@ -17,11 +17,20 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import math
+import resource
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+from opengwasdb.layouts.dense.build_vcf import (  # noqa: E402
+    build_dense_from_vcf_manifest,
+)
+from opengwasdb.query import query_store  # noqa: E402
+from opengwasdb.validation import validate_store  # noqa: E402
+
 from resources.lib.release_yaml import (  # noqa: E402
     merge_validation_yaml,
     read_release_yaml,
@@ -31,40 +40,58 @@ from resources.lib.release_yaml import (  # noqa: E402
     resolve_path,
 )
 
-from opengwasdb.layouts.dense.build_vcf import build_dense_from_vcf_manifest
-from opengwasdb.query import query_store
-
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--release-dir", required=True)
     parser.add_argument("--store-dir")
     parser.add_argument("--overwrite", action="store_true")
+    parser.add_argument("--workers", type=int, default=1)
     return parser.parse_args()
 
 
 def write_builder_manifest(rows: list[dict[str, str]], out_path: Path) -> None:
     """Translate this registry's analyses.tsv column names into the shape
     opengwasdb.layouts.dense.build_vcf._read_manifest() actually requires."""
+    ancestry_columns = sorted({
+        column
+        for row in rows
+        for column in row
+        if column.startswith("ancestry_prop_")
+    })
     fieldnames = [
         "trait_id", "file_path", "trait_name", "n", "stored_effect_scale",
+        "source_reader_capability", "source_assembly",
         "original_sd_method", "original_sd", "assigned_ancestry",
+        "ancestry_assignment_method", "original_effect_scale",
+        "sample_size_kind", "sample_size_scope", "n_cases", "n_controls",
         "trait_ontology_id", "trait_ontology_label",
         "license", "publication_doi", "publication_pmid", "consortium", "first_author",
+        *ancestry_columns,
     ]
     with out_path.open("w", newline="", encoding="utf-8") as fh:
         writer = csv.DictWriter(fh, delimiter="\t", fieldnames=fieldnames, lineterminator="\n")
         writer.writeheader()
         for row in rows:
+            if row.get("exclude_from_build") == "true":
+                continue
             writer.writerow({
                 "trait_id": row["analysis_id"],
                 "file_path": row["source_file"],
                 "trait_name": row["analysis_label"],
                 "n": row["sample_size"],
                 "stored_effect_scale": row["stored_effect_scale"],
+                "source_reader_capability": row.get("source_reader_capability", ""),
+                "source_assembly": row.get("source_genome_build", ""),
                 "original_sd_method": row["original_sd_method"],
                 "original_sd": row.get("original_sd", ""),
                 "assigned_ancestry": row.get("assigned_ancestry", ""),
+                "ancestry_assignment_method": row.get("ancestry_assignment_method", ""),
+                "original_effect_scale": row.get("original_effect_scale", ""),
+                "sample_size_kind": row.get("sample_size_kind", ""),
+                "sample_size_scope": row.get("sample_size_scope", ""),
+                "n_cases": row.get("n_cases", ""),
+                "n_controls": row.get("n_controls", ""),
                 "trait_ontology_id": row.get("trait_ontology_id", ""),
                 "trait_ontology_label": row.get("trait_ontology_label", ""),
                 "license": row.get("license", ""),
@@ -72,16 +99,27 @@ def write_builder_manifest(rows: list[dict[str, str]], out_path: Path) -> None:
                 "publication_pmid": row.get("publication_pmid", ""),
                 "consortium": row.get("consortium", ""),
                 "first_author": row.get("first_author", ""),
+                **{column: row.get(column, "") for column in ancestry_columns},
             })
+
+
+def directory_size(path: Path) -> int:
+    return sum(item.stat().st_size for item in path.rglob("*") if item.is_file())
+
+
+def first_probe(rows: list[dict[str, str]], scale: str) -> str:
+    return next((row["analysis_id"] for row in rows if row["stored_effect_scale"] == scale), "")
 
 
 def main() -> None:
     args = parse_args()
+    if args.workers < 1:
+        raise SystemExit("--workers must be at least 1")
     release_dir = Path(args.release_dir).resolve()
     root = repo_root(release_dir)
     release = read_release_yaml(release_dir / "release.yaml")
     build = read_release_yaml(release_dir / "build.yaml")
-    rows = read_tsv(release_dir / "analyses.tsv")
+    rows = [row for row in read_tsv(release_dir / "analyses.tsv") if row.get("exclude_from_build") != "true"]
 
     store_dir = (
         Path(args.store_dir).resolve()
@@ -89,6 +127,7 @@ def main() -> None:
         else resolve_path(root, require_text(build, "artifacts", "store_uri"))
     )
 
+    started = time.monotonic()
     with tempfile.TemporaryDirectory() as tmp:
         builder_manifest_path = Path(tmp) / "manifest.tsv"
         write_builder_manifest(rows, builder_manifest_path)
@@ -98,40 +137,63 @@ def main() -> None:
             store_id=require_text(release, "store_family_id"),
             release_id=require_text(release, "family_release_id"),
             overwrite=args.overwrite,
+            n_workers=args.workers,
         )
+    build_wall_seconds = time.monotonic() - started
 
     # Read-back: query one known Analysis and confirm finite association
     # statistics, plus that the *resolved* stored_effect_scale (not a
     # VCF-header re-derivation -- opengwasdb#14) and passthrough
     # Analytical Metadata (analysis_label, ADR 0034) actually made it in.
-    probe_id = rows[0]["analysis_id"]
+    binary_probe_id = first_probe(rows, "log_or")
+    quantitative_probe_id = next(
+        (row["analysis_id"] for row in rows if row["stored_effect_scale"] != "log_or"),
+        "",
+    )
+    probe_ids = [probe for probe in (binary_probe_id, quantitative_probe_id) if probe]
     query = query_store(store_dir)
     try:
-        assoc = query.analysis(probe_id, observed_only=True)
+        associations = {
+            probe: query.analysis(probe, observed_only=True)
+            for probe in probe_ids
+        }
         analyses_table = query.analyses_table()
     finally:
         query.close()
 
-    n_finite = int(sum(1 for z in assoc["z"] if z == z and abs(z) < float("inf")))
+    finite_by_probe = {
+        probe: int(sum(1 for z in assoc["z"] if math.isfinite(z)))
+        for probe, assoc in associations.items()
+    }
     store_by_id = {r["analysis_id"]: r for r in analyses_table.values()}
-    probe_row = store_by_id[probe_id]
+    store_validation = validate_store(store_dir)
 
     report = {
         "store_uri": str(store_dir),
         "n_analyses": result.n_analyses,
         "n_variants": result.n_variants,
-        "probe_analysis_id": probe_id,
-        "probe_n_associations": len(assoc["z"]),
-        "probe_n_finite_z": n_finite,
-        "probe_stored_effect_scale": probe_row.get("stored_effect_scale"),
-        "probe_analysis_label": probe_row.get("analysis_label"),
-        "probe_trait_ontology_mapping_method": next(
-            r["trait_ontology_mapping_method"] for r in rows if r["analysis_id"] == probe_id
+        "source_download_bytes": sum(Path(row["source_file"]).stat().st_size for row in rows),
+        "store_bytes": directory_size(store_dir),
+        "build_wall_seconds": f"{build_wall_seconds:.3f}",
+        "peak_rss_kib": max(
+            resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,
+            resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss,
         ),
+        "binary_probe_analysis_id": binary_probe_id,
+        "binary_probe_n_associations": len(associations.get(binary_probe_id, {}).get("z", [])),
+        "binary_probe_n_finite_z": finite_by_probe.get(binary_probe_id, 0),
+        "quantitative_probe_analysis_id": quantitative_probe_id,
+        "quantitative_probe_n_associations": len(
+            associations.get(quantitative_probe_id, {}).get("z", [])
+        ),
+        "quantitative_probe_n_finite_z": finite_by_probe.get(quantitative_probe_id, 0),
+        "store_validation_status": "passed" if store_validation.ok else "failed",
     }
     warnings = []
-    if n_finite == 0:
-        warnings.append(f"{probe_id}: zero finite association statistics in built store")
+    for probe_id, n_finite in finite_by_probe.items():
+        if n_finite == 0:
+            warnings.append(f"{probe_id}: zero finite association statistics in built store")
+    warnings.extend(f"store validation: {error}" for error in store_validation.errors)
 
     # Confirm shared-core columns the manifest actually populated (resolved
     # stored_effect_scale -- opengwasdb#14 -- plus analysis_label/
@@ -147,11 +209,18 @@ def main() -> None:
                 f"{store_row.get('stored_effect_scale')!r} != manifest-resolved "
                 f"{row['stored_effect_scale']!r}"
             )
-        for column in ("analysis_label", "trait_ontology_id", "trait_ontology_label"):
-            if row.get(column) and not store_row.get(column):
+        metadata_columns = (
+            "analysis_label", "trait_ontology_id", "trait_ontology_label",
+            "sample_size_kind", "sample_size_scope", "sample_size", "n_cases", "n_controls",
+            "assigned_ancestry", "ancestry_assignment_method", "original_effect_scale",
+            "original_sd", "original_sd_method",
+            *(column for column in row if column.startswith("ancestry_prop_")),
+        )
+        for column in metadata_columns:
+            if store_row.get(column, "") != row.get(column, ""):
                 warnings.append(
-                    f"{row['analysis_id']}: {column} present in the manifest but missing from "
-                    "the built store's analyses.tsv"
+                    f"{row['analysis_id']}: built {column}={store_row.get(column)!r} "
+                    f"!= manifest {row.get(column)!r}"
                 )
 
     report_path = release_dir / "sidecars" / "build_report.tsv"
@@ -161,11 +230,18 @@ def main() -> None:
         writer.writeheader()
         writer.writerow(report)
 
-    build_status = "passed_with_warnings" if warnings else "passed"
+    build_status = "failed" if not store_validation.ok else (
+        "passed_with_warnings" if warnings else "passed"
+    )
     merge_validation_yaml(
         release_dir / "validation.yaml",
         validator_name="resources/generators/opengwas-gwas-vcf-dense/build-store.py",
-        updated_checks={"schema": "passed", "files": build_status, "reader_smoke_test": build_status},
+        updated_checks={
+            "schema": "passed",
+            "files": build_status,
+            "reader_smoke_test": build_status,
+            "store": build_status,
+        },
         updated_reports={"build_report": str(report_path.relative_to(release_dir))},
         new_warnings=warnings,
     )
