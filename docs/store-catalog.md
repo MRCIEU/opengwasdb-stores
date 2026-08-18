@@ -15,12 +15,15 @@ artifacts themselves live outside this repository under
 └── metabolome-plasma-2023   -> /data/opengwasdb/metabolome-plasma-2023
 ```
 
+See [`query-walkthrough.html`](query-walkthrough.html) for real `opengwasdb`
+query calls (and their actual output) against each of the four stores below.
+
 The symlinks are a convenience for browsing only -- every registry
 `artifacts.store_uri`/`artifact_root` path still points at the real location
 under `/data/opengwasdb/<family>/...`, so nothing else needs to change if the
 symlinks move or are removed.
 
-Last updated 2026-08-18. Regenerate by re-reading each store's `manifest.json`
+Last updated 2026-08-19. Regenerate by re-reading each store's `manifest.json`
 and the matching `families/*/releases/*/release.yaml` -- see "How this was
 compiled" at the bottom.
 
@@ -132,10 +135,43 @@ required opengwasdb#100 (fixed): the builder no longer hard-requires a
 omits by this registry's own documented family-shape convention (see
 `docs/release-metadata-schema.md`).
 
+## ukb-b
+
+UK Biobank GWAS-VCF analyses from the OpenGWAS `ukb-b` batch (2,514
+case-control + quantitative Analyses), built via `build_dense_from_vcf_manifest`
+(`opengwasdb.v0.1_dense_vcf_two_pass`). Ancestry: EUR (UKB's cohort; no
+approximation needed). **Known caveat** (opengwasdb#14, open): the real
+VCF-manifest builder never consumes manifest-supplied
+`stored_effect_scale`/`sample_size_kind`/`n_cases`/`n_controls`, so every
+built `ukb-b` store -- including the completed release below -- genuinely
+lacks these required `analyses.tsv` columns, even though
+`dense-observed-vcf-c128-resolved` (candidate, not built) has already
+resolved them at the manifest level. This is a pre-existing, family-wide gap,
+not something either release below introduces.
+
+| Release | Layout | State | Location | Variants | Analyses | Size | Status |
+|---|---|---|---|---|---|---|---|
+| `dense-observed-vcf-c128` | Dense | Observed-Only | `/data/opengwasdb/wip/ukb-b-c128.opengwasdb` | 9,847,701 | 2,514 | -- | candidate |
+| `dense-observed-vcf-c128-completed-issue34` | Dense | Reference-Completed | `/data/opengwasdb/stores/ukb-b-c128-completed.opengwasdb` | 11,192,757 (1,345,056 new) | 2,514 | 71G | built (`failed`, opengwasdb#14) |
+| `dense-observed-vcf-pilot-10` | Dense | Observed-Only | `/data/opengwasdb/wip/` | -- | 10 | -- | built |
+
+`dense-observed-vcf-c128-completed-issue34`: 11,266,156,810 cells imputed,
+18,645,778 imputation-failed, 2,766,547,727 left off-panel-missing, against a
+UKB-specific rebuilt hg38 EUR LD panel (`/data/opengwasdb/reference/ukb-hg38`,
+opengwasdb-stores#34 -- distinct from the shared HGDP+1kGP panel other
+families in this catalog use). Built 2026-08-05, elapsed ~7.7h; not formally
+registered as a Store Release until 2026-08-19, when its `analyses.tsv` also
+needed migrating in place onto the current unified schema (opengwasdb#103,
+fixed) after ADR-0034 landed out from under it. `opengwasdb validate` reports
+`valid` -- the `failed` status above is entirely the inherited opengwasdb#14
+metadata gap, not a completion or migration defect.
+
 ## Other real stores not under `/data/opengwasdb/pilot`
 
 Excluded from the consolidation above by user request (scoped to families
-registered in the current working session); listed here for completeness.
+registered earlier in this working session); listed here for completeness.
+`ukb-b` (above) is also outside that consolidation, but gets its own section
+since it now has a fully registered, real, built Reference-Completed release.
 
 - **`pqtl-interval-2018/2018-sun-pilot-100`** -- a real, built Ragged store
   (100-Analysis SomaScan pQTL pilot, PMID 29875488, European), but its
@@ -146,9 +182,6 @@ registered in the current working session); listed here for completeness.
   a legacy `traits.tsv.gz`), so it cannot be Reference-Completed with
   current tooling (`scripts/migrate_store_to_analyses_tsv.py` explicitly
   excludes Ragged stores, ADR-0030).
-- **`ukb-b/dense-observed-vcf-c128`** and **`dense-observed-vcf-pilot-10`**
-  -- real built Dense stores, but under `/data/opengwasdb/wip/`
-  (work-in-progress, `status: candidate`, not an accepted release bundle).
 
 ## How this was compiled
 
