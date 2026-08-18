@@ -255,37 +255,64 @@ def main() -> None:
 
     cis_region = choose_region(regions, "cis")
     trans_region = choose_region(regions, "significant_trans") or choose_region(regions, "suggestive_trans")
-    if cis_region is None:
-        raise SystemExit("No non-empty cis region found in sparse_regions.tsv")
-    if trans_region is None:
-        raise SystemExit("No non-empty trans region found in sparse_regions.tsv")
+    if cis_region is None and trans_region is None:
+        raise SystemExit("No non-empty cis or trans region found in sparse_regions.tsv")
 
-    cis_trait = trait_by_id[cis_region["analysis_id"]]
-    trans_trait = trait_by_id[trans_region["analysis_id"]]
-    cis_query = associations_in_region(
-        reader,
-        variants,
-        int(cis_trait["analysis_index"]),
-        cis_region["chromosome"],
-        int(cis_region["start"]),
-        int(cis_region["end"]),
-    )
-    trans_query = associations_in_region(
-        reader,
-        variants,
-        int(trans_trait["analysis_index"]),
-        trans_region["chromosome"],
-        int(trans_region["start"]),
-        int(trans_region["end"]),
-    )
-    cis_expected = int(cis_region.get("n_variants_retained") or 0)
-    trans_expected = int(trans_region.get("n_variants_retained") or 0)
+    # Gene-target-less Store Families (e.g. small-molecule metabolomics) have
+    # no cis window by design (docs/release-metadata-schema.md's documented
+    # family-shape convention) and so no "cis" rows in sparse_regions.tsv --
+    # the cis smoke test only runs when a cis region actually exists.
+    cis_fields: dict[str, object] = {}
     expected_associations = sum(int(row["retained_rows"]) for row in filter_summary if row.get("status") == "ok")
     warnings = shared_core_passthrough_warnings(rows, trait_by_id)
-    if cis_query["observed"] != cis_expected:
-        warnings.append(f"cis query observed {cis_query['observed']} associations but sidecar records {cis_expected}")
-    if trans_query["observed"] != trans_expected:
-        warnings.append(f"trans query observed {trans_query['observed']} associations but sidecar records {trans_expected}")
+    if cis_region is not None:
+        cis_trait = trait_by_id[cis_region["analysis_id"]]
+        cis_query = associations_in_region(
+            reader,
+            variants,
+            int(cis_trait["analysis_index"]),
+            cis_region["chromosome"],
+            int(cis_region["start"]),
+            int(cis_region["end"]),
+        )
+        cis_expected = int(cis_region.get("n_variants_retained") or 0)
+        if cis_query["observed"] != cis_expected:
+            warnings.append(f"cis query observed {cis_query['observed']} associations but sidecar records {cis_expected}")
+        cis_fields = {
+            "cis_analysis_id": cis_region["analysis_id"],
+            "cis_region_id": cis_region["region_id"],
+            "cis_region": f"{cis_region['chromosome']}:{cis_region['start']}-{cis_region['end']}",
+            "cis_sidecar_associations": cis_expected,
+            "cis_query_associations": cis_query["observed"],
+            "cis_top_variant": cis_query["top_variant"],
+            "cis_top_z": cis_query["top_z"],
+        }
+
+    trans_fields: dict[str, object] = {}
+    if trans_region is not None:
+        trans_trait = trait_by_id[trans_region["analysis_id"]]
+        trans_query = associations_in_region(
+            reader,
+            variants,
+            int(trans_trait["analysis_index"]),
+            trans_region["chromosome"],
+            int(trans_region["start"]),
+            int(trans_region["end"]),
+        )
+        trans_expected = int(trans_region.get("n_variants_retained") or 0)
+        if trans_query["observed"] != trans_expected:
+            warnings.append(f"trans query observed {trans_query['observed']} associations but sidecar records {trans_expected}")
+        trans_fields = {
+            "trans_analysis_id": trans_region["analysis_id"],
+            "trans_region_id": trans_region["region_id"],
+            "trans_region_kind": trans_region["region_kind"],
+            "trans_region": f"{trans_region['chromosome']}:{trans_region['start']}-{trans_region['end']}",
+            "trans_sidecar_associations": trans_expected,
+            "trans_query_associations": trans_query["observed"],
+            "trans_top_variant": trans_query["top_variant"],
+            "trans_top_z": trans_query["top_z"],
+        }
+
     if result.n_associations != expected_associations:
         warnings.append(
             f"store has {result.n_associations} associations but filter summary records {expected_associations}"
@@ -314,21 +341,8 @@ def main() -> None:
         "n_variants": result.n_variants,
         "n_associations": result.n_associations,
         "filter_summary_retained_rows": expected_associations,
-        "cis_analysis_id": cis_region["analysis_id"],
-        "cis_region_id": cis_region["region_id"],
-        "cis_region": f"{cis_region['chromosome']}:{cis_region['start']}-{cis_region['end']}",
-        "cis_sidecar_associations": cis_expected,
-        "cis_query_associations": cis_query["observed"],
-        "cis_top_variant": cis_query["top_variant"],
-        "cis_top_z": cis_query["top_z"],
-        "trans_analysis_id": trans_region["analysis_id"],
-        "trans_region_id": trans_region["region_id"],
-        "trans_region_kind": trans_region["region_kind"],
-        "trans_region": f"{trans_region['chromosome']}:{trans_region['start']}-{trans_region['end']}",
-        "trans_sidecar_associations": trans_expected,
-        "trans_query_associations": trans_query["observed"],
-        "trans_top_variant": trans_query["top_variant"],
-        "trans_top_z": trans_query["top_z"],
+        **cis_fields,
+        **trans_fields,
         "warnings": "; ".join(warnings) if warnings else "none",
     }
     report_path = release_dir / "sidecars" / "build_report.tsv"

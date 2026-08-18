@@ -21,6 +21,10 @@ resources/data/ragged-spike/
 # Generated ragged GWAS-SSF filtered files and built stores.
 resources/data/gwas-ssf-ragged/
 
+# Built OpenGWASDB store from the no-cis-region-policy fixture's build-store.py
+# smoke test (issue #101 follow-up); regenerated fresh each test run.
+tests/no-cis-region-policy/fixtures/output/store/
+
 # Smoke-test sidecars from partial generator runs.
 families/*/releases/*/sidecars/*.partial.tsv
 

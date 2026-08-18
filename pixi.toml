@@ -69,7 +69,20 @@ threadpoolctl = ">=3.0"
 # (validate_analyses(), to_json_schema()) -- the shared core schema this
 # registry's checks.schema validates emitted manifests against, replacing
 # this repository's hand-rolled per-generator column-name checks.
-opengwasdb = { git = "https://github.com/explodecomputer/opengwasdb", rev = "b2ad3381528d43da9c8d68453861265e1ccb3114" }
+#
+# Bumped for opengwasdb#100: build_ragged_from_ssf hard-required a trait_id
+# manifest column that gene-target-less Store Families (metabolome-plasma-2023)
+# correctly omit by this registry's own documented per-family-shape convention;
+# also picks up opengwasdb#99 (Hybrid disjoint-partition fix on LD-panel
+# extension).
+#
+# Bumped for opengwasdb#101: build_ragged_from_ssf silently kept conflicting
+# duplicate (analysis, variant) rows when a GWAS-SSF file had more than one
+# row canonicalizing to the same cell -- found building metabolome-plasma-2023
+# at production scale (up to 107/108 duplicate pairs genuinely conflicting in
+# one release). Now resolved (identical duplicates collapse, conflicting ones
+# drop) rather than silently kept.
+opengwasdb = { git = "https://github.com/explodecomputer/opengwasdb", rev = "1ecfd1e7945d4258e5b0585ae9381be5ecbe9373" }
 
 [feature.r.dependencies]
 r-base = ">=4.3"

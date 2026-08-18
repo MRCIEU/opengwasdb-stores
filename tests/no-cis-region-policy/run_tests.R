@@ -77,4 +77,26 @@ summary_dt <- fread(file.path(output_dir, "sidecars", "filter_summary.tsv"), sep
 check(identical(summary_dt$status[1], "ok"), "filter_summary should record status=ok for the fixture analysis")
 check(summary_dt$cis_rows[1] == 0, "cis_rows should be 0 for a no-target family")
 
+# build-store.py's read-back smoke test used to unconditionally require a
+# non-empty cis region (opengwasdb-stores#101 follow-up): every no-target
+# family's build failed with "No non-empty cis region found in
+# sparse_regions.tsv" right after the real OpenGWASDB store had already been
+# built successfully, before validation.yaml/build_report.tsv were ever
+# written. The cis smoke test is now conditional on a cis region actually
+# existing; this proves the trans-only path succeeds end to end.
+build_status <- system2(
+  "python3",
+  c("resources/generators/gwas-ssf-ragged/build-store.py", paste0("--release-dir=", output_dir), "--overwrite")
+)
+check(build_status == 0, "build-store.py should succeed for a no-cis (trans-only) release bundle")
+
+report <- fread(file.path(output_dir, "sidecars", "build_report.tsv"), sep = "\t", na.strings = "")
+check(!"cis_analysis_id" %in% names(report), "build_report.tsv should have no cis_* columns for a no-target family")
+check("trans_analysis_id" %in% names(report), "build_report.tsv should still carry trans_* columns")
+check(report$n_analyses[1] == 1, "expected 1 analysis in the fixture build report")
+
+validation <- read_yaml(file.path(output_dir, "validation.yaml"))
+check(identical(validation$checks$schema, "passed"), "validation.yaml checks.schema should be passed after build-store.py runs")
+check(identical(validation$checks$files, "passed"), "validation.yaml checks.files should be passed after build-store.py runs")
+
 cat(sprintf("ALL %d CHECKS PASSED\n", n_checks))
