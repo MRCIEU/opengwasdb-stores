@@ -1,7 +1,7 @@
 metadata_schema_version: 1
 store_family_id: eqtlgen-cis-pilot
 family_release_id: pilot-10
-status: candidate
+status: built
 source_collection_id: eqtlgen-cis
 source_snapshot_id: eqtlgen-2019-cis-full
 source_snapshot:
@@ -10,12 +10,12 @@ source_snapshot:
 release_kind: one-off
 association_coverage: cis
 description: 10 well-known genes' cis-eQTL summary statistics from the eQTLGen Consortium's 2019 whole-blood cis-eQTL meta-analysis (31,684 samples), built into a real Ragged Observed-Only Store via opengwasdb's existing build_ragged_from_besd(). Proves the BESD -> Ragged pipeline end to end; not the full eQTLGen cis-eQTL catalogue (19,250 genes).
-created_at: "2026-08-18T15:37:36.443142+00:00"
+created_at: "2026-08-18T15:44:32.579882+00:00"
 generator:
   name: resources/generators/eqtlgen-besd-ragged/generate.py
   command: python3 resources/generators/eqtlgen-besd-ragged/generate.py --config=families/eqtlgen-cis-pilot/generators/config-pilot-10.yaml
 build_environment:
-  repo_commit: f18f1b4d5b390bf1337f0d5949af9e15ef1bc802
+  repo_commit: 03701f9b182e9f2e0d430f2afc7399435fe68ef1
   opengwasdb_version: 0.1.0
   opengwasdb_commit: abc02640b73550006d4a58e0fe89558e5ef4cfdf
   pixi_lock_sha256: 89d840eaaf4b4620e523010be59c1ea30296fc15efcdb0ba0040849f633c89c5

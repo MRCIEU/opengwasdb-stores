@@ -24,9 +24,9 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 # (label, kind, command relative to REPO_ROOT)
 SUITES: list[tuple[str, str, list[str]]] = [
     ("ancestry-assignment", "python", ["tests/ancestry-assignment/run_tests.py"]),
-    ("eqtlgen-besd-ragged", "python", ["tests/eqtlgen-besd-ragged/test_subset_besd.py"]),
     ("effect-scale-validation (R)", "r", ["tests/effect-scale-validation/run_tests.R"]),
     ("effect-scale-validation (merge)", "python", ["tests/effect-scale-validation/test_build_store_validation_merge.py"]),
+    ("eqtlgen-besd-ragged", "python", ["tests/eqtlgen-besd-ragged/test_subset_besd.py"]),
     ("ld-panel-eigendecomposition", "python", ["tests/ld-panel-eigendecomposition/run_tests.py"]),
     ("ld-panel-generation", "python", ["tests/ld-panel-generation/run_tests.py"]),
     ("metadata-resolvers/gwas-catalog-ssf", "r", ["tests/metadata-resolvers/gwas-catalog-ssf/run_tests.R"]),

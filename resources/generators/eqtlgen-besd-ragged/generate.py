@@ -218,7 +218,12 @@ def main() -> None:
             "metadata_schema_version": 1,
             "store_family_id": store_family_id,
             "family_release_id": family_release_id,
-            "status": "candidate",
+            # "built" once the store has actually been built and passes
+            # opengwasdb's own validate_store() (this script always builds
+            # before writing release.yaml, so this reflects the just-completed
+            # build's outcome, not an aspirational default); "candidate"
+            # otherwise, matching this registry's documented release lifecycle.
+            "status": "built" if store_validation.ok else "candidate",
             "source_collection_id": require_text(cfg, "source_collection_id"),
             "source_snapshot_id": require_text(cfg, "source", "source_snapshot_id"),
             "source_snapshot": {
@@ -254,6 +259,13 @@ def main() -> None:
                 "target_reference_assembly": "GRCh38",
                 "liftover": "hg19-to-hg38" if source_genome_build != "hg38" else "none",
             },
+            # docs/release-metadata-schema.md marks effects.stored_effect_scale
+            # required, but BESD/molecular-QTL Analyses carry no effect-scale
+            # concept for build_ragged_from_besd() to declare (see the
+            # analyses.tsv comment above) -- recorded as null rather than
+            # silently omitting the whole block, the same "never fabricate,
+            # never silently drop" choice checks.schema=not_run makes below.
+            "effects": {"stored_effect_scale": None},
             "shape": {"association_coverage": require_text(cfg, "association_coverage")},
             "validation": {"required": True},
             "artifacts": {

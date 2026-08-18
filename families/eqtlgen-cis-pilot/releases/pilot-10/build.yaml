@@ -11,6 +11,8 @@ source:
 normalisation:
   target_reference_assembly: GRCh38
   liftover: hg19-to-hg38
+effects:
+  stored_effect_scale: null
 shape:
   association_coverage: cis
 validation:
